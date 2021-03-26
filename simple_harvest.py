@@ -1,5 +1,8 @@
-from collections import defaultdict
+import sys
 import numpy as np
+from io import StringIO
+from contextlib import closing
+from collections import defaultdict
 
 from gym import Env, spaces
 
@@ -10,9 +13,7 @@ class SimpleHarvest(Env):
 
     Observation:
         Apples available
-        Apples picked by agents
-        Punishments received
-        Punishments given
+        Previous actions
 
     Action:
         WAIT (and let apples grow)
@@ -27,34 +28,42 @@ class SimpleHarvest(Env):
 
     Example:
         3 agents, (agent0, agent1, agent2)
-        initially 50 apples
-        memory = 2  # how far back the history is remembered
+        initially 50 apples (half the carrying capacity)
         growth_rate = 0.0  # no new apples will appear
         action history:
-            0, 1, 3  # this is forgotten as memory is only 2
+            0, 1, 3
             4, 1, 1
             4, 0, 3
-        observations given history:
-            tuple(
-                47, # apples remaining
-                np.array([  # agent0, agent1, agent2
-                    [0, 1, 1],  # apples picked
-                    [0, 0, 1],  # Punishment received by agent0
-                    [0, 0, 0],  # Punishment received by agent1
-                    [2, 0, 0],  # Punishment received by agent2
-                    [0, 0, 2],  # Punishment given by agent0
-                    [0, 0, 0],  # Punishment given by agent1
-                    [1, 0, 0],  # Punishment given by agent2
-                ], dtype=np.uint8)
-            )
-                
+        next observations:
+        (
+            # agent0
+            np.array([
+                47,  # apples picked
+                4,   # action agent0
+                0,   # action agent0
+                3,   # action agent0
+            ]),
+            # agent1
+            np.array([
+                47,  # apples picked
+                3,   # action agent0
+                4,   # action agent0
+                0,   # action agent0
+            ]),
+            # agent2
+            np.array([
+                47,  # apples picked
+                0,   # action agent0
+                3,   # action agent0
+                4,   # action agent0
+            ]),
+        )    
         
     """
 
     def __init__(
         self,
         n_agents=2,
-        memory=5,
         punish_cost=0.0,
         punished_cost=-2.0,
         max_apples=100,
@@ -64,9 +73,9 @@ class SimpleHarvest(Env):
 
         Arguments:
             n_agents (int): number of agents in environment
-            memory (int): how far back the agents remember
             punish_cost (float): cost of punishing other
             punished_cost (float): cost when being punished
+            max_apples (int): carrying capacity of apples
             growth_rate (float): growth rate in logistic growth
         """
 
@@ -90,30 +99,16 @@ class SimpleHarvest(Env):
         )
 
         self.max_apples = max_apples
-        self.observation_space = (
-            spaces.Discrete(self.max_apples + 1)
-            spaces.Box(
-                low=0,
-                high=self.memory,
-                shape=(1 + 2 * n_agents, n_agents),
-                dtype=np.uint8,
-            ),
-        )
+        self.observation_space = spaces.MultiDiscrete([
+            self.max_apples + 1,
+            *[self.n_agents + 2 for i in range(self.n_agents)],
+        ])
 
-        # Initial observations
-        self.available_apples = self.observation_space[0].n // 2
-        self.remembered_history = np.zeros(
-            *self.observation_space[1].shape
-        )
-        (
-            self.picked_apples,
-            self.have_punished,
-            self.been_punished,
-        ) = np.array_split(
-                self.remembered_history, 
-                indices_or_sections=[1, -self.n_agents],
-                axis=0,
-        )
+        # Initial observation variables
+        self.initial_apples = self.max_apples // 2
+        self.available_apples = self.initial_apples
+        self.previous_actions = np.zeros(self.n_agents)
+        self.previous_rewards = np.zeros(self.n_agents)
 
         # Other
         self.punish_cost = punish_cost
@@ -124,25 +119,87 @@ class SimpleHarvest(Env):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
+    def reset(self):
+        self.t = 0
+        self.available_apples = self.initial_apples
+        self.previous_actions = np.zeros(self.n_agents)
+        self.previous_rewards = np.zeros(self.n_agents)
+        return self.get_obs()
+
     def get_obs(self, agent=0):
-        agent_remembered_history = np.roll(
-            self.remembered_history,
-            shift=-agent,
-            axis=0,
+        return np.hstack(
+            self.available_apples,
+            np.roll(self.previous_actions, -agent),
         )
+        
         return self.available_apples, agent_remembered_history
 
-    def logistic_growth(self)
-        '''Logistic growth.
+    @staticmethod
+    def shift_actions(actions):
+        """Shift punishing actions
 
-        Differential equation
-            dP/dt = r*P*(1 - P / K)
+        Translate actions such that p_action=i means punish agenti
+        """
+        punishes = (actions > 1)
+        p_actions = (
+            actions - 2 + np.arange(self.n_agents)
+        ) % self.n_agents
+
+        shifted_actions = actions
+        shifted_actions[punishes] = p_actions[punishes]
+        return shifted_actions
+
+
+    def get_rewards(self):
+        actions = self.previous_actions
+        rewards = np.zeros(self.n_agents)
+
+        # If pick apples
+        attempt_pick = (actions==1)
+        pick_reward = min(
+            1.0,  # enough apples
+            self.available_apples / attempt_pick.sum(),  # share
+        )
+        rewards[attempt_pick] += pick_reward
+
+        # If punishes
+        punishes = (actions > 1)
+        rewards[punishes] += self.punish_cost
+
+        # If punished
+        shifted_actions = self.shift_actions(actions)
+        # Count punishments for each agent
+        i_punished, punishments = np.unique(
+            shifted_actions[punishes],
+            return_counts=True,
+        )
+        rewards[i_punished] = punishments
+        
+        return rewards
+
+    def update_available_apples(self)
+        '''Apples picked plus logistic growth.
+
+        Differential equation for logistic growth
+            dP / dt = r * P * (1 - P / K)
         '''
+        actions = self.previous_actions
+
+        # Picked apples
+        attempt_pick = (actions==1)
+        self.available_apples -= (actions==1).sum()
+        self.available_apples = max(0, self.available_apples)
+
+        # Logistic growth
         growth_factor = 1.0 + self.growth_rate
         filled_capacity = self.available_apples / self.max_apples
-        self.available_apples *= int(np.round(
+        self.available_apples *= (
             growth_factor * (1.0 - filled_capacity)
-        ))
+        )
+        self.available_apples = max(
+            0,
+            int(np.rint(self.available_apples))
+        )
 
     def step(self, *actions):
         "Actions given as tuple"
@@ -155,100 +212,58 @@ class SimpleHarvest(Env):
 
         done = False
         self.t += 1
+        self.previous_actions = np.array(actions)
+        info = {}
 
+        # Get rewards
+        rewards = self.get_rewards()
+        self.previous_rewards = rewards
+        reward = rewards[0]
+        for i_agent in range(self.n_agents):
+            info["reward{i_agent}"] = reward[i_agent]
+        
         # Update number of apples
-        actions = np.array(actions)
-        attempt_pick = (actions==1)
-        self.available_apples -= (actions==1).sum()
-        if self.available_apples<=0:
-            self.available_apples = 0
+        self.previous_actions = actions
+        self.update_available_apples()
+        if self.available_apples==0:
             done = True
-        else:
-            self.logisitic_growth()
 
-        # Update history and get observation
-        #TODO
-        obs = self.getObs()
+        # Get observations
+        obs0 = self.get_obs(agent=0)
+        for i_agent in range(self.n_agents):
+            info["obs{i_agent}"] = self.get_obs(agent=i_agent)
 
-        if self.t >= self.t_limit:
-          done = True
-
-        if self.game.agent_left.life <= 0 or self.game.agent_right.life <= 0:
-          done = True
-
-        otherObs = None
-        if self.multiagent:
-          if self.from_pixels:
-            otherObs = cv2.flip(obs, 1) # horizontal flip
-          else:
-            otherObs = self.game.agent_left.getObservation()
-
-        info = {
-          'ale.lives': self.game.agent_right.lives(),
-          'ale.otherLives': self.game.agent_left.lives(),
-          'otherObs': otherObs,
-          'state': self.game.agent_right.getObservation(),
-          'otherState': self.game.agent_left.getObservation(),
-        }
-
-        if self.survival_bonus:
-          return obs, reward+0.01, done, info
         return obs, reward, done, info
 
-    def init_game_state(self):
-      self.t = 0
-      self.game.reset()
+    def render(self, mode='human'):
 
-    def reset(self):
-      self.init_game_state()
-      return self.getObs()
+        # Description of state
+        shifted_actions = self.shift_actions(self.previous_actions)
+        rewards = self.previous_rewards
+        desc = (
+            f"Apples: {self.available_apples:3d}\n",
+            "\n"
+            f"Actions:  " "  ".join([
+                f"Agent{i_agent}"
+                for i_agent in range(self.n_agents)
+            ]) "\n"
+            f"          " "  ".join([
+                f"{self.get_action_meaning(shifted_actions[i_agent]):>7s}"
+                for i_agent in range(self.n_agents)
+            ]) "\n"
+            f"          " "  ".join([
+                f"{rewards[i_agent]:7g}"
+                for i_agent in range(self.n_agents)
+            ]) "\n"
+        )
 
-    def checkViewer(self):
-      # for opengl viewer
-      if self.viewer is None:
-        checkRendering()
-        self.viewer = rendering.SimpleImageViewer(maxwidth=2160) # macbook pro resolution
+        # Output
+        outfile = StringIO() if mode == 'ansi' else sys.stdout
+        outfile.write(desc)
 
-    def render(self, mode='human', close=False):
-
-      if PIXEL_MODE:
-        if self.canvas is not None: # already rendered
-          rgb_array = self.canvas
-          self.canvas = None
-          if mode == 'rgb_array' or mode == 'human':
-            self.checkViewer()
-            larger_canvas = upsize_image(rgb_array)
-            self.viewer.imshow(larger_canvas)
-            if (mode=='rgb_array'):
-              return larger_canvas
-            else:
-              return
-
-        self.canvas = self.game.display(self.canvas)
-        # scale down to original res (looks better than rendering directly to lower res)
-        self.canvas = downsize_image(self.canvas)
-
-        if mode=='state':
-          return np.copy(self.canvas)
-
-        # upsampling w/ nearest interp method gives a retro "pixel" effect look
-        larger_canvas = upsize_image(self.canvas)
-        self.checkViewer()
-        self.viewer.imshow(larger_canvas)
-        if (mode=='rgb_array'):
-          return larger_canvas
-
-      else: # pyglet renderer
-        if self.viewer is None:
-          checkRendering()
-          self.viewer = rendering.Viewer(WINDOW_WIDTH, WINDOW_HEIGHT)
-
-        self.game.display(self.viewer)
-        return self.viewer.render(return_rgb_array = mode=='rgb_array')
-
-    def close(self):
-      if self.viewer:
-        self.viewer.close()
+        if mode != 'human':
+            with closing(outfile):
+                return outfile.getvalue()
       
-    def get_action_meanings(self):
-      return [self.atari_action_meaning[i] for i in self.atari_action_set]
+    def get_actions_meaning(self, action):
+        return self.action_meaning[action]
