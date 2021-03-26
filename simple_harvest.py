@@ -8,7 +8,7 @@ class SimpleHarvest(Env):
 
     This game is no longer a gridworld game.
 
-    State:
+    Observation:
         Apples available
         Apples picked by agents
         Punishments received
@@ -24,6 +24,31 @@ class SimpleHarvest(Env):
         PICK: +1 if apples_available else 0
         PUNISH: -punish_cost
         PUNISHED: -punished_cost
+
+    Example:
+        3 agents, (agent0, agent1, agent2)
+        initially 50 apples
+        memory = 2  # how far back the history is remembered
+        growth_rate = 0.0  # no new apples will appear
+        action history:
+            0, 1, 3  # this is forgotten as memory is only 2
+            4, 1, 1
+            4, 0, 3
+        observations given history:
+            tuple(
+                47, # apples remaining
+                np.array([  # agent0, agent1, agent2
+                    [0, 1, 1],  # apples picked
+                    [0, 0, 1],  # Punishment received by agent0
+                    [0, 0, 0],  # Punishment received by agent1
+                    [2, 0, 0],  # Punishment received by agent2
+                    [0, 0, 2],  # Punishment given by agent0
+                    [0, 0, 0],  # Punishment given by agent1
+                    [1, 0, 0],  # Punishment given by agent2
+                ], dtype=np.uint8)
+            )
+                
+        
     """
 
     def __init__(
@@ -79,6 +104,15 @@ class SimpleHarvest(Env):
         self.available_apples = self.observation_space[0].n // 2
         self.remembered_history = np.zeros(
             *self.observation_space[1].shape
+        )
+        (
+            self.picked_apples,
+            self.have_punished,
+            self.been_punished,
+        ) = np.array_split(
+                self.remembered_history, 
+                indices_or_sections=[1, -self.n_agents],
+                axis=0,
         )
 
         # Other
