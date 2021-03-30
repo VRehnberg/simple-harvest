@@ -58,16 +58,15 @@ class SimpleHarvest(Env):
                 4,   # action agent0
             ]),
         )    
-        
     """
 
     def __init__(
         self,
-        n_agents=2,
+        n_agents=1,
         punish_cost=0.0,
         punished_cost=-2.0,
         max_apples=100,
-        growth_rate=0.5,
+        growth_rate=0.1,
     ):
         """Initialize SimpleHarvest
 
@@ -82,28 +81,25 @@ class SimpleHarvest(Env):
         # Time
         self.t = 0
         self.t_limit = 3000
-        self.memory = memory
 
         # Actions
-        self.n_agents
-        self.action_space = spaces.Discrete(self.n_agents + 2)
-        self.action_meanings = dict(
-            **{
-                0 : "NOOP",
-                1 : "PICK",
-            },
-            **{  # 0 is the agent that does the action
-                i + 2 : "PUNISH-{i}"
+        self.n_agents = n_agents
+        self.action_meanings = dict([
+            *[
+                (0, "NOOP"),
+                (1, "PICK"),
+            ],
+            *[  # 0 is the agent that does the action
+                (i + 2, f"PUNISH-{i}")
                 for i in range(self.n_agents)
-            },
-        )
-
-        self.max_apples = max_apples
-        self.observation_space = spaces.MultiDiscrete([
-            self.max_apples + 1,
-            *[self.n_agents + 2 for i in range(self.n_agents)],
+            ],
         ])
 
+        self.max_apples = max_apples
+        self.observation_space = self.generate_observation_space(
+            self.max_apples,
+            self.n_agents,
+        )
         # Initial observation variables
         self.initial_apples = self.max_apples // 2
         self.available_apples = self.initial_apples
@@ -114,6 +110,13 @@ class SimpleHarvest(Env):
         self.punish_cost = punish_cost
         self.punished_cost = punished_cost
         self.growth_rate = growth_rate
+
+    @staticmethod
+    def generate_observation_space(max_apples, n_agents):
+        return spaces.MultiDiscrete([
+            max_apples + 1,
+            *[n_agents + 2 for i in range(n_agents)],
+        ])
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -127,15 +130,12 @@ class SimpleHarvest(Env):
         return self.get_obs()
 
     def get_obs(self, agent=0):
-        return np.hstack(
+        return np.hstack([
             self.available_apples,
             np.roll(self.previous_actions, -agent),
-        )
-        
-        return self.available_apples, agent_remembered_history
+        ])
 
-    @staticmethod
-    def shift_actions(actions):
+    def shift_actions(self, actions):
         """Shift punishing actions
 
         Translate actions such that p_action=i means punish agenti
@@ -150,17 +150,18 @@ class SimpleHarvest(Env):
         return shifted_actions
 
 
-    def get_rewards(self):
+    def calculate_rewards(self):
         actions = self.previous_actions
         rewards = np.zeros(self.n_agents)
 
         # If pick apples
         attempt_pick = (actions==1)
-        pick_reward = min(
-            1.0,  # enough apples
-            self.available_apples / attempt_pick.sum(),  # share
-        )
-        rewards[attempt_pick] += pick_reward
+        if any(attempt_pick):
+            pick_reward = min(
+                1.0,  # enough apples
+                self.available_apples / attempt_pick.sum(),  # share
+            )
+            rewards[attempt_pick] += pick_reward
 
         # If punishes
         punishes = (actions > 1)
@@ -177,7 +178,24 @@ class SimpleHarvest(Env):
         
         return rewards
 
-    def update_available_apples(self)
+    @staticmethod
+    def logistic_growth(population, growth_rate, capacity, to_int=True):
+        '''dP / dt = r * P * (1 - P / K)'''
+        # Calculate population growth
+        d_population = growth_rate * population * (
+            1 - population / capacity
+        )
+
+        if to_int:
+            # Probabilistic rounding to integer
+            d_population = int(d_population + np.random.rand())
+        
+        # Update population size
+        population += d_population
+        return population
+        
+
+    def update_available_apples(self):
         '''Apples picked plus logistic growth.
 
         Differential equation for logistic growth
@@ -191,14 +209,10 @@ class SimpleHarvest(Env):
         self.available_apples = max(0, self.available_apples)
 
         # Logistic growth
-        growth_factor = 1.0 + self.growth_rate
-        filled_capacity = self.available_apples / self.max_apples
-        self.available_apples *= (
-            growth_factor * (1.0 - filled_capacity)
-        )
-        self.available_apples = max(
-            0,
-            int(np.rint(self.available_apples))
+        self.available_apples = self.logistic_growth(
+            population=self.available_apples,
+            growth_rate=self.growth_rate,
+            capacity=self.max_apples,
         )
 
     def step(self, *actions):
@@ -216,22 +230,21 @@ class SimpleHarvest(Env):
         info = {}
 
         # Get rewards
-        rewards = self.get_rewards()
+        rewards = self.calculate_rewards()
         self.previous_rewards = rewards
         reward = rewards[0]
         for i_agent in range(self.n_agents):
-            info["reward{i_agent}"] = reward[i_agent]
+            info[f"reward{i_agent}"] = rewards[i_agent]
         
         # Update number of apples
-        self.previous_actions = actions
         self.update_available_apples()
         if self.available_apples==0:
             done = True
 
         # Get observations
-        obs0 = self.get_obs(agent=0)
         for i_agent in range(self.n_agents):
-            info["obs{i_agent}"] = self.get_obs(agent=i_agent)
+            info[f"obs{i_agent}"] = self.get_obs(agent=i_agent)
+        obs = info["obs0"]
 
         return obs, reward, done, info
 
@@ -240,22 +253,24 @@ class SimpleHarvest(Env):
         # Description of state
         shifted_actions = self.shift_actions(self.previous_actions)
         rewards = self.previous_rewards
-        desc = (
-            f"Apples: {self.available_apples:3d}\n",
-            "\n"
-            f"Actions:  " "  ".join([
-                f"Agent{i_agent}"
+        desc = "\n".join([
+            "",
+            f"Apples: {self.available_apples:3d}",
+            "",
+            f"Actions:  " + "  ".join([
+                f" Agent{i_agent}"
                 for i_agent in range(self.n_agents)
-            ]) "\n"
-            f"          " "  ".join([
+            ]),
+            f"          " + "  ".join([
                 f"{self.get_action_meaning(shifted_actions[i_agent]):>7s}"
                 for i_agent in range(self.n_agents)
-            ]) "\n"
-            f"          " "  ".join([
+            ]),
+            f"          " + "  ".join([
                 f"{rewards[i_agent]:7g}"
                 for i_agent in range(self.n_agents)
-            ]) "\n"
-        )
+            ]),
+            "",
+        ])
 
         # Output
         outfile = StringIO() if mode == 'ansi' else sys.stdout
@@ -265,5 +280,18 @@ class SimpleHarvest(Env):
             with closing(outfile):
                 return outfile.getvalue()
       
-    def get_actions_meaning(self, action):
-        return self.action_meaning[action]
+    def get_action_meaning(self, action):
+        return self.action_meanings[action]
+
+
+if __name__=="__main__":
+    n_agents = 5
+    env = SimpleHarvest(n_agents=n_agents, growth_rate=0.1)
+    obs = env.reset()
+    print(obs)
+    done = False
+    while not done:
+        actions = np.random.randint(0, 2, n_agents)
+        obs, reward, done, info = env.step(*actions)
+        rewards = [r for k, r in info.items() if "reward" in k]
+        print("Observation:", *obs)#, "Rewards", *rewards)
