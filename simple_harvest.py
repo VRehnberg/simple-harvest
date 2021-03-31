@@ -77,6 +77,7 @@ class SimpleHarvest(Env):
             max_apples (int): carrying capacity of apples
             growth_rate (float): growth rate in logistic growth
         """
+        super().__init__()
 
         # Time
         self.t = 0
@@ -100,6 +101,8 @@ class SimpleHarvest(Env):
             self.max_apples,
             self.n_agents,
         )
+        self.action_space = spaces.Discrete(self.n_agents + 2)
+
         # Initial observation variables
         self.initial_apples = self.max_apples // 2
         self.available_apples = self.initial_apples
@@ -145,13 +148,13 @@ class SimpleHarvest(Env):
             actions - 2 + np.arange(self.n_agents)
         ) % self.n_agents
 
-        shifted_actions = actions
-        shifted_actions[punishes] = p_actions[punishes]
+        shifted_actions = actions.copy()
+        shifted_actions[punishes] = p_actions[punishes] + 2
         return shifted_actions
 
 
     def calculate_rewards(self):
-        actions = self.previous_actions
+        actions = self.previous_actions.copy()
         rewards = np.zeros(self.n_agents)
 
         # If pick apples
@@ -168,13 +171,15 @@ class SimpleHarvest(Env):
         rewards[punishes] += self.punish_cost
 
         # If punished
-        shifted_actions = self.shift_actions(actions)
+        shifted_actions = self.shift_actions(actions.copy())
         # Count punishments for each agent
-        i_punished, punishments = np.unique(
-            shifted_actions[punishes],
+        i_punished, n_punishments = np.unique(
+            shifted_actions[punishes] - 2,
             return_counts=True,
         )
-        rewards[i_punished] = punishments
+        rewards[i_punished] += n_punishments * self.punished_cost
+
+        assert all(rewards <= 1)
         
         return rewards
 
@@ -201,7 +206,12 @@ class SimpleHarvest(Env):
         Differential equation for logistic growth
             dP / dt = r * P * (1 - P / K)
         '''
-        actions = self.previous_actions
+        actions = self.previous_actions.copy()
+        if any(
+            action not in self.action_space
+            for action in actions
+        ):
+            raise ValueError("Actions outside action space.")
 
         # Picked apples
         attempt_pick = (actions==1)
@@ -252,21 +262,23 @@ class SimpleHarvest(Env):
 
         # Description of state
         shifted_actions = self.shift_actions(self.previous_actions)
-        rewards = self.previous_rewards
+        rewards = self.previous_rewards.copy()
+        
+        l = 8
         desc = "\n".join([
             "",
             f"Apples: {self.available_apples:3d}",
             "",
-            f"Actions:  " + "  ".join([
-                f" Agent{i_agent}"
+            f"Agents:   " + " ".join([
+                f'{f" Agent{i_agent}":>{l}}'
                 for i_agent in range(self.n_agents)
             ]),
-            f"          " + "  ".join([
-                f"{self.get_action_meaning(shifted_actions[i_agent]):>7s}"
+            f"Actions:  " + " ".join([
+                f"{self.get_action_meaning(shifted_actions[i_agent]):>{l}s}"
                 for i_agent in range(self.n_agents)
             ]),
-            f"          " + "  ".join([
-                f"{rewards[i_agent]:7g}"
+            f"Rewards:  " + " ".join([
+                f"{rewards[i_agent]:{l}g}"
                 for i_agent in range(self.n_agents)
             ]),
             "",

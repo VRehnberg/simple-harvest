@@ -5,13 +5,21 @@ import matplotlib.pyplot as plt
 from simple_harvest import SimpleHarvest
 from agents import AppleAgent, Punisher
 
+PAPER = True
+if PAPER:
+    import seaborn as sns
+    sns.set_context("paper", font_scale=1.5)
+    sns.set_style("darkgrid")
+    sns.set_palette("deep")
+    sns.set(font='sans-serif')
+
 def visualize_growth():
     log_growth = SimpleHarvest.logistic_growth
 
     # Parameters
-    population = np.arange(0, 101, dtype=float)
+    capacity = 1
+    population = np.linspace(0, capacity, 101, dtype=float)
     growth_rate = np.logspace(-0.5, -1.5, 5)
-    capacity = 100
 
     fig, ax = plt.subplots()
     for x_growth_rate in growth_rate:
@@ -25,11 +33,11 @@ def visualize_growth():
         d_population = new_population - population
 
         # Plot results
-        label = f"Growth rate {x_growth_rate:.2g}"
+        label = f"$r={x_growth_rate:.2g}$"
         ax.plot(population, d_population, label=label)[0]
 
-    ax.set_xlabel("Population")
-    ax.set_ylabel("Population growth")
+    ax.set_xlabel("Relative population $P/K$")
+    ax.set_ylabel("Relative population growth $\Delta P/K$")
     ax.legend()
     
     return fig
@@ -66,12 +74,16 @@ def run_example(env, agents, t_max=100, render=True):
 
     avg_rewards = total_rewards / t
     for agent, avg_reward in zip(agents, avg_rewards):
-        print(f"Reward for {agent}: {avg_reward:.4g}.")
+        print(f"Reward for {agent}: {avg_reward:.4g}")
 
 def main():
 
     # Visualize apple population logistic growth
+    sns.set(font_scale=1.5)
     fig = visualize_growth()
+    fig.tight_layout()
+    fig.savefig("growth_rate.pdf", bbox_inches="tight")
+    sns.set(font_scale=0.6666)
 
     # Example run
     max_apples = 100
@@ -88,7 +100,7 @@ def main():
         *[AppleAgent(obs_space) for _ in range(n_random_agents)],
         *[Punisher(obs_space) for _ in range(n_punisher_agents)],
     ]
-    run_example(env, agents)
+    run_example(env, agents, render=False)
     
     plt.show()
 
