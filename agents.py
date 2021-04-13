@@ -4,14 +4,13 @@ from torch import nn
 
 class ObservationEmbedding(nn.Module):
 
-    def __init__(self, observation_space, action_embedding_dim):
+    def __init__(self, max_apples, n_agents, action_embedding_dim):
         super().__init__()
-        
-        nvec = observation_space.nvec
-        self.max_apples = nvec[0]
-        self.n_agents = nvec[1]
-        self.n_actions = self.n_agents + 2
 
+        self.max_apples = max_apples
+        self.n_actions = n_agents + 2
+        self.n_agents = n_agents
+        
         self.action_embedding = nn.Embedding(
             self.n_actions,
             action_embedding_dim,
@@ -19,7 +18,7 @@ class ObservationEmbedding(nn.Module):
 
     def forward(x):
         # Scale number of apples to between -1 and 1
-        x[:, 0] = 2.0 * x[:, 0] / self.max_apples - 1.0
+        x[:, 0] = 2.0 * (x[:, 0] / self.max_apples) - 1.0
         
         # Encode actions
         x = torch.hstack([
@@ -34,26 +33,39 @@ class ObservationEmbedding(nn.Module):
 
 class AppleAgent():
 
-    def __init__(self, observation_space):
-        nvec = observation_space.nvec
-        self.max_apples = nvec[0]
-        self.n_actions = nvec[1]
-        self.n_agents = self.n_actions - 2
+    def __init__(self, max_apples, n_agents):
+        self.max_apples = max_apples
+        self.n_actions = n_agents + 2
+        self.n_agents = n_agents
+        
+        # Parameter used in trainable inheriting classes
+        self.training = True
 
     def reset(self, observation):
         self.obs = observation
+        self.episode = 0
 
     def act(self):
         a = torch.randint(self.n_actions, [])
         return a
 
     def update(self, action, observation, reward, done):
+        self.episode += 1
         self.previous_action = action
         self.previous_reward = reward
         self.obs = observation
 
     def new_agent(self):
         pass
+
+    def train(self, mode=True):
+        if hasattr(super(), "train"):
+            super().train()
+        self.training = mode
+        return self
+
+    def eval(self):
+        return self.train(mode=False)
 
     def __repr__(self):
         return (
@@ -91,20 +103,22 @@ class QLearner(AppleAgent):
 
     def __init__(
         self,
-        observation_space,
+        max_apples,
+        n_agents,
         learning_rate=1.0,
         discount=1.0,
         epsilon=0.0,
     ):
-        super().__init__(observation_space)
-
-        #TODO
-        raise NotImplementedError
+        super().__init__(max_apples, n_agents)
 
         # Dimensionality
-        self.observation_dims = np.array(observation_dims)
-        self.n_states = np.prod(observation_dims)
-        self.n_actions = n_actions
+        self.observation_dims = [
+            self.max_apples + 1, *[
+                self.n_actions
+                for _ in range(1, self.n_agents)
+            ]
+        ]
+        self.n_states = np.prod(self.observation_dims)
         self.q_values = np.zeros([self.n_states, self.n_actions])
 
         # Learning parameters
@@ -113,9 +127,7 @@ class QLearner(AppleAgent):
         self.discount = discount
         self.initial_epsilon = epsilon
         self.epsilon = epsilon
-        self.episodic = episodic
-        self.memory = memory
-        self.history = np.zeros([self.memory, 3], dtype=int)
+        self.episode = 0
 
     def observe(self, observation):
         '''Update state from observation.'''
@@ -127,57 +139,39 @@ class QLearner(AppleAgent):
         self.state = state
 
     def act(self):
-        if self.random_state.rand() > self.epsilon:
+        if np.random.rand() > self.epsilon:
             action = np.argmax(self.q_values[self.state, :])
         else:
-            action = self.random_state.choice(self.n_actions)
+            action = np.random.choice(self.n_actions)
         return action
 
     def update(self, action, observation, reward, done):
+
         # Update states
         previous_state = self.state
-        self.observe(observation)
-        if not self.episodic:
-            # If not episodic episode is the same as taken steps
-            self.episode += 1
-            self.epsilon = self.initial_epsilon / self.episode
+        self.observe(observation)  # here self.state is updated
+        self.episode += 1
+        self.epsilon = self.initial_epsilon / self.episode
 
-        # If case for speed up in Chain case
-        if self.memory > 1:
-            # Update history
-            self.history = np.roll(self.history, -1, axis=0)
-            self.history[-1, :] = (previous_state, action, reward)
-
-            # Get indices from history
-            states = self.history[:self.episode, 0]
-            actions = self.history[:self.episode, 1]
-            rewards = self.history[:self.episode, 2]
-            next_states = np.roll(states, -1)
-            next_states[-1] = self.state
-        else:
-            self.history[-1, :] = (previous_state, action, reward)
-            states = self.history[:, 0]
-            actions = self.history[:, 1]
-            rewards = self.history[:, 2]
-            next_states = np.array([self.state])
+        state = previous_state
+        next_state = self.state
 
         # Perform Q-learning step
-        future_rewards = self.q_values[next_states, :].max(axis=1)
         if done:
-            future_rewards[-1] = 0.0
+            future_reward = 0.0
+        else:
+            future_reward = self.q_values[next_state, :].max()
 
-        self.q_values[states, actions] += self.learning_rate * (
-            rewards
-            + self.discount * future_rewards
-            - self.q_values[states, actions]
+        self.q_values[state, action] += self.learning_rate * (
+            reward
+            + self.discount * future_reward
+            - self.q_values[state, action]
         )
         
     def reset(self, observation):
         '''Run when starting new game.'''
-        if self.episodic:
-            self.episode += 1
-            self.epsilon = self.initial_epsilon / self.episode
         self.observe(observation)
+        self.episode = 0
 
     def new_agent(self):
         self.episode = 0
@@ -214,6 +208,6 @@ class MLAgent(nn.Module, AppleAgent):
     def forward(self):
         raise NotImplementedError
 
-    def train(self):
-        raise NotImplementedError
-
+    def train(self, mode=True):
+        super().train(mode=mode)
+        return self

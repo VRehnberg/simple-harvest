@@ -1,9 +1,14 @@
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import trange, tqdm
 
 from simple_harvest import SimpleHarvest
-from agents import AppleAgent, Punisher
+from agents import AppleAgent, Punisher, QLearner
+
+# Debugging
+from IPython import embed
+import pdb
 
 PAPER = True
 if PAPER:
@@ -42,7 +47,35 @@ def visualize_growth():
     
     return fig
 
+def train_agents(env, agents, n_epochs=10000, t_max=100):
+    '''Train agents for some epochs.'''
+
+    n_agents = env.n_agents
+    
+    obs = env.reset()
+    for i_agent, agent in enumerate(agents):
+        obs = env.get_obs(i_agent)
+        agent.reset(obs)
+        agent.train()
+
+    for epoch in trange(n_epochs, desc="Epoch"):
+        for t in range(t_max):
+
+            actions = [agent.act() for agent in agents]
+            all_obs, _, done, info = env.step(*actions)
+
+            for i_agent, agent in enumerate(agents):
+                action = actions[i_agent]
+                obs = env.get_obs(agent=i_agent)
+                reward = env.previous_rewards[i_agent]
+                agent.update(action, obs, reward, done)
+
+            if done:
+                print("\rGame lasted", t, "iterations.\n")
+                break
+
 def run_example(env, agents, t_max=100, render=True):
+    '''Run a single game with a maximal length.'''
     
     n_agents = env.n_agents
     
@@ -50,6 +83,7 @@ def run_example(env, agents, t_max=100, render=True):
     for i_agent, agent in enumerate(agents):
         obs = env.get_obs(i_agent)
         agent.reset(obs)
+        agent.eval()
 
     total_rewards = np.zeros(n_agents)
 
@@ -86,21 +120,27 @@ def main():
     sns.set(font_scale=0.6666)
 
     # Example run
-    max_apples = 100
-    n_random_agents = 2
-    n_punisher_agents = 3
-    n_agents = n_random_agents + n_punisher_agents
+    agent_parameters = [
+        # Agent, n, args, kwargs
+        (AppleAgent, 0, {}),  # random agents
+        (Punisher,   0, {}),
+        (QLearner,   1, {"discount": 0.9, "epsilon": 0.5}),
+    ]
+    n_agents = sum(n for _, n, _ in agent_parameters)
+    max_apples = 10 * n_agents
     env = SimpleHarvest(
         n_agents=n_agents,
         max_apples=max_apples,
-        growth_rate=0.1,
+        growth_rate=0.01,
     )
-    obs_space = env.observation_space
     agents = [
-        *[AppleAgent(obs_space) for _ in range(n_random_agents)],
-        *[Punisher(obs_space) for _ in range(n_punisher_agents)],
+        Agent(max_apples, n_agents, **kwargs)
+        for Agent, n, kwargs in agent_parameters
+        for _ in range(n)
     ]
+    train_agents(env, agents)
     run_example(env, agents, render=False)
+    embed()
     
     plt.show()
 

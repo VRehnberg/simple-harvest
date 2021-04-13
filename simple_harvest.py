@@ -118,7 +118,7 @@ class SimpleHarvest(Env):
     def generate_observation_space(max_apples, n_agents):
         return spaces.MultiDiscrete([
             max_apples + 1,
-            *[n_agents + 2 for i in range(n_agents)],
+            *[n_agents + 2 for i in range(1, n_agents)],
         ])
 
     def seed(self, seed=None):
@@ -128,14 +128,14 @@ class SimpleHarvest(Env):
     def reset(self):
         self.t = 0
         self.available_apples = self.initial_apples
-        self.previous_actions = np.zeros(self.n_agents)
+        self.previous_actions = np.zeros(self.n_agents, dtype=int)
         self.previous_rewards = np.zeros(self.n_agents)
         return self.get_obs()
 
     def get_obs(self, agent=0):
         return np.hstack([
             self.available_apples,
-            np.roll(self.previous_actions, -agent),
+            np.roll(self.previous_actions, -agent)[1:],
         ])
 
     def shift_actions(self, actions):
