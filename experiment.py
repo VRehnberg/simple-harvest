@@ -47,18 +47,42 @@ def visualize_growth():
     
     return fig
 
-def train_agents(env, agents, n_epochs=10000, t_max=100):
+def train_agents(env, agents, n_epochs=100, t_max=1000, plot=True):
     '''Train agents for some epochs.'''
 
     n_agents = env.n_agents
     
-    obs = env.reset()
-    for i_agent, agent in enumerate(agents):
-        obs = env.get_obs(i_agent)
-        agent.reset(obs)
-        agent.train()
+    if plot:
+        # Axis
+        fig, ax = plt.subplots()
+        ax.set_xlim([0, n_epochs - 1])
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Training reward")
+
+        # Colors
+        cmap = plt.cm.get_cmap("plasma")
+        colors = [cmap(x) for x in np.linspace(0, 1, n_agents)]
+
+        # Theoretical maximum and legend
+        cap = env.max_apples
+        rate = env.growth_rate
+        satmax = (t_max - cap / 2) * rate * cap / 4 + cap / 2
+        ax.axhline(satmax, ls="--", c="k", label="SATMax")
+        for i_agent, col in enumerate(colors):
+            ax.plot(-1, cap / 2, ".", c=col, label=f"Agent{i_agent}")
+        if n_agents > 1:
+            ax.plot(-1, cap / 2, ".k", label=f"Sum")
+        ax.legend()
 
     for epoch in trange(n_epochs, desc="Epoch"):
+
+        obs = env.reset()
+        for i_agent, agent in enumerate(agents):
+            obs = env.get_obs(i_agent)
+            agent.reset(obs)
+            agent.train()
+
+        rewards = np.zeros(n_agents)
         for t in range(t_max):
 
             actions = [agent.act() for agent in agents]
@@ -69,10 +93,18 @@ def train_agents(env, agents, n_epochs=10000, t_max=100):
                 obs = env.get_obs(agent=i_agent)
                 reward = env.previous_rewards[i_agent]
                 agent.update(action, obs, reward, done)
+                rewards[i_agent] += reward
 
             if done:
-                print("\rGame lasted", t, "iterations.\n")
                 break
+
+        if plot:
+            if n_agents > 1:
+                ax.plot(epoch, rewards.sum(), 'k.')
+            for reward, col in zip(rewards, colors):
+                ax.plot(epoch, reward, '.', c=col)
+            plt.pause(0.01)
+                
 
 def run_example(env, agents, t_max=100, render=True):
     '''Run a single game with a maximal length.'''
@@ -112,26 +144,24 @@ def run_example(env, agents, t_max=100, render=True):
 
 def main():
 
-    # Visualize apple population logistic growth
-    sns.set(font_scale=1.5)
-    fig = visualize_growth()
-    fig.tight_layout()
-    fig.savefig("growth_rate.pdf", bbox_inches="tight")
-    sns.set(font_scale=0.6666)
-
     # Example run
+    qwargs = dict(
+        discount=0.95,
+        epsilon=0.2,
+        epsilon_rate=0.05,
+    )
     agent_parameters = [
         # Agent, n, args, kwargs
         (AppleAgent, 0, {}),  # random agents
-        (Punisher,   0, {}),
-        (QLearner,   1, {"discount": 0.9, "epsilon": 0.5}),
+        (Punisher,   1, {}),
+        (QLearner,   2, qwargs),
     ]
     n_agents = sum(n for _, n, _ in agent_parameters)
-    max_apples = 10 * n_agents
+    max_apples = 20 * n_agents
     env = SimpleHarvest(
         n_agents=n_agents,
         max_apples=max_apples,
-        growth_rate=0.01,
+        growth_rate=0.05,
     )
     agents = [
         Agent(max_apples, n_agents, **kwargs)
@@ -142,6 +172,13 @@ def main():
     run_example(env, agents, render=False)
     embed()
     
+    # Visualize apple population logistic growth
+    sns.set(font_scale=1.5)
+    fig = visualize_growth()
+    fig.tight_layout()
+    fig.savefig("growth_rate.pdf", bbox_inches="tight")
+    sns.set(font_scale=0.6666)
+
     plt.show()
 
 if __name__=="__main__":

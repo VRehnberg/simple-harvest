@@ -93,7 +93,6 @@ class Punisher(AppleAgent):
                 action = 0
             else:
                 # Punish one of the transgressors
-                print(took_apples)
                 took_idx = np.flatnonzero(took_apples)
                 action = np.random.choice(took_idx)
 
@@ -108,6 +107,7 @@ class QLearner(AppleAgent):
         learning_rate=1.0,
         discount=1.0,
         epsilon=0.0,
+        epsilon_rate=1.0,
     ):
         super().__init__(max_apples, n_agents)
 
@@ -127,6 +127,7 @@ class QLearner(AppleAgent):
         self.discount = discount
         self.initial_epsilon = epsilon
         self.epsilon = epsilon
+        self.epsilon_rate = epsilon_rate
         self.episode = 0
 
     def observe(self, observation):
@@ -150,8 +151,10 @@ class QLearner(AppleAgent):
         # Update states
         previous_state = self.state
         self.observe(observation)  # here self.state is updated
+        self.epsilon = self.initial_epsilon / (
+            1 + self.epsilon_rate * self.episode
+        )
         self.episode += 1
-        self.epsilon = self.initial_epsilon / self.episode
 
         state = previous_state
         next_state = self.state
@@ -171,7 +174,6 @@ class QLearner(AppleAgent):
     def reset(self, observation):
         '''Run when starting new game.'''
         self.observe(observation)
-        self.episode = 0
 
     def new_agent(self):
         self.episode = 0
