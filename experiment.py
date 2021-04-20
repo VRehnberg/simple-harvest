@@ -5,6 +5,7 @@ from tqdm import trange, tqdm
 
 from simple_harvest import SimpleHarvest
 from agents import AppleAgent, Punisher, QLearner
+from metrics import Gini
 
 # Debugging
 from IPython import embed
@@ -47,14 +48,24 @@ def visualize_growth():
     
     return fig
 
-def train_agents(env, agents, n_epochs=100, t_max=1000, plot=True):
+def train_agents(
+    env,
+    agents,
+    n_epochs=100,
+    t_max=1000,
+    plot=True,
+    metrics=[],
+):
     '''Train agents for some epochs.'''
 
     n_agents = env.n_agents
     
     if plot:
         # Axis
-        fig, ax = plt.subplots()
+        if metrics:
+            fig, (ax, ax_metric) = plt.subplots(1, 2)
+        else:
+            fig, ax = plt.subplots()
         ax.set_xlim([0, n_epochs - 1])
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Training reward")
@@ -68,19 +79,26 @@ def train_agents(env, agents, n_epochs=100, t_max=1000, plot=True):
         rate = env.growth_rate
         satmax = (t_max - cap / 2) * rate * cap / 4 + cap / 2
         ax.axhline(satmax, ls="--", c="k", label="SATMax")
-        for i_agent, col in enumerate(colors):
-            ax.plot(-1, cap / 2, ".", c=col, label=f"Agent{i_agent}")
+        for col, agent in zip(colors, agents):
+            ax.plot(-1, cap / 2, ".", c=col, label=repr(agent))
         if n_agents > 1:
             ax.plot(-1, cap / 2, ".k", label=f"Sum")
         ax.legend()
 
+        # Metrics TODO
+
+
     for epoch in trange(n_epochs, desc="Epoch"):
 
+        # Reset
         obs = env.reset()
         for i_agent, agent in enumerate(agents):
             obs = env.get_obs(i_agent)
             agent.reset(obs)
             agent.train()
+        
+        for metric in metrics:
+            metric.reset()
 
         rewards = np.zeros(n_agents)
         for t in range(t_max):
@@ -88,6 +106,7 @@ def train_agents(env, agents, n_epochs=100, t_max=1000, plot=True):
             actions = [agent.act() for agent in agents]
             all_obs, _, done, info = env.step(*actions)
 
+            # Update agents
             for i_agent, agent in enumerate(agents):
                 action = actions[i_agent]
                 obs = env.get_obs(agent=i_agent)
@@ -95,16 +114,24 @@ def train_agents(env, agents, n_epochs=100, t_max=1000, plot=True):
                 agent.update(action, obs, reward, done)
                 rewards[i_agent] += reward
 
+            # Update metrics
+            for metric in metrics:
+                metric.update(info)
+
             if done:
                 break
 
         if plot:
+            # Add agents progress
             if n_agents > 1:
                 ax.plot(epoch, rewards.sum(), 'k.')
             for reward, col in zip(rewards, colors):
                 ax.plot(epoch, reward, '.', c=col)
+            # Add metrics
+
+            # Update plot
             plt.pause(0.01)
-                
+        
 
 def run_example(env, agents, t_max=100, render=True):
     '''Run a single game with a maximal length.'''
@@ -168,9 +195,10 @@ def main():
         for Agent, n, kwargs in agent_parameters
         for _ in range(n)
     ]
-    train_agents(env, agents)
+    metrics = [Gini(n_agents=n_agents)]
+    train_agents(env, agents, metrics=metrics)
     run_example(env, agents, render=False)
-    embed()
+#     embed()
     
     # Visualize apple population logistic growth
     sns.set(font_scale=1.5)
@@ -179,7 +207,7 @@ def main():
     fig.savefig("growth_rate.pdf", bbox_inches="tight")
     sns.set(font_scale=0.6666)
 
-    plt.show()
+#     plt.show()
 
 if __name__=="__main__":
     main()

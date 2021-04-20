@@ -1,9 +1,11 @@
-
+import numpy as np
 
 class Metric():
     
     def __init__(self):
         self.__value = 0
+        # If metric for each agent or not
+        self.__agent_based = False
 
     @property
     def value(self):
@@ -26,6 +28,7 @@ class Gini(Metric):
         self.income = np.zeros(self.n_agents)
 
     def update(self, info):
+        # TODO look at https://link.springer.com/article/10.1007/s10260-014-0293-4
         self.income += [info[f"reward{i}"] for i in range(self.n_agents)]
 
         # sum_i sum_j |y_i - y_j| / (2 n sum_i y_i)
