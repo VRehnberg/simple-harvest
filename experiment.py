@@ -5,7 +5,7 @@ from tqdm import trange, tqdm
 
 from simple_harvest import SimpleHarvest
 from agents import AppleAgent, Punisher, QLearner
-from metrics import Gini
+from metrics import GiniRewards, GiniApples
 
 # Debugging
 from IPython import embed
@@ -195,7 +195,7 @@ def main():
         for Agent, n, kwargs in agent_parameters
         for _ in range(n)
     ]
-    metrics = [Gini(n_agents=n_agents)]
+    metrics = [GiniRewards(n_agents), GiniApples(n_agents)]
     train_agents(env, agents, metrics=metrics)
     run_example(env, agents, render=False)
 #     embed()

@@ -233,11 +233,15 @@ class SimpleHarvest(Env):
                 f"{len(actions)} actions given, "
                 f"but there are {self.n_agents} agents."
             )
-
+    
         done = False
         self.t += 1
         self.previous_actions = np.array(actions)
-        info = {}
+        info = {
+            f"action{i_agent}": action
+            for i_agent, action
+            in enumerate(actions)
+        }
 
         # Get rewards
         rewards = self.calculate_rewards()
