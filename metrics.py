@@ -26,8 +26,8 @@ class Metric():
 class GiniRewards(Metric):
     '''Generalised Gini coefficient based on rewards
     
-        Generalization from Rafinetti, Siletti and Vernizzi
-       https://doi.org/10.1007/s10260-014-0293-4
+    Generalization from Rafinetti, Siletti and Vernizzi (2015)
+    https://doi.org/10.1007/s10260-014-0293-4
     '''
 
     def __init__(self, n_agents):

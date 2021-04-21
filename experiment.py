@@ -63,31 +63,56 @@ def train_agents(
     if plot:
         # Axis
         if metrics:
-            fig, (ax, ax_metric) = plt.subplots(1, 2)
+            fig, (ax, ax_metric) = plt.subplots(1, 2, figsize=(12, 4.8))
+            ax_metric.set_xlim([0, n_epochs - 1])
+            ax_metric.set_ylim([-0.05, 1.05])
+            ax_metric.set_xlabel("Epoch")
+            ax_metric.set_ylabel("Metric value")
         else:
             fig, ax = plt.subplots()
         ax.set_xlim([0, n_epochs - 1])
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Training reward")
 
-        # Colors
-        cmap = plt.cm.get_cmap("plasma")
-        colors = [cmap(x) for x in np.linspace(0, 1, n_agents)]
-
         # Theoretical maximum and legend
         cap = env.max_apples
         rate = env.growth_rate
         satmax = (t_max - cap / 2) * rate * cap / 4 + cap / 2
         ax.axhline(satmax, ls="--", c="k", label="SATMax")
-        for col, agent in zip(colors, agents):
-            ax.plot(-1, cap / 2, ".", c=col, label=repr(agent))
+        colors = []
+        for agent in agents:
+            p = ax.plot(-10, cap / 2, ".", label=repr(agent))
+            colors.append(p[0].get_color())
         if n_agents > 1:
-            ax.plot(-1, cap / 2, ".k", label=f"Sum")
-        ax.legend()
+            ax.plot(-10, cap / 2, ".k", label=f"Sum")
+        ax.legend(
+            title="Rewards",
+            loc='lower center',
+            bbox_to_anchor=(0.5, 0.97),
+            ncol=3,
+            fancybox=True,
+            shadow=True,
+        )
 
-        # Metrics TODO
+        # Metrics
+        colors_metric = []
+        for metric in metrics:
+            p = ax_metric.plot(-10, 0.5, '.', label=repr(metric))
+            colors_metric.append(p[0].get_color())
 
+        if ax_metric:
+            ax_metric.legend(
+                title="Metrics",
+                loc='lower center',
+                bbox_to_anchor=(0.5, 0.97),
+                ncol=3,
+                fancybox=True,
+                shadow=True,
+            )
 
+        fig.tight_layout()
+
+    # Training loop
     for epoch in trange(n_epochs, desc="Epoch"):
 
         # Reset
@@ -127,7 +152,10 @@ def train_agents(
                 ax.plot(epoch, rewards.sum(), 'k.')
             for reward, col in zip(rewards, colors):
                 ax.plot(epoch, reward, '.', c=col)
+            
             # Add metrics
+            for metric, col in zip(metrics, colors_metric):
+                ax_metric.plot(epoch, metric.value, '.', c=col)
 
             # Update plot
             plt.pause(0.01)
