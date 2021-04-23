@@ -2,7 +2,6 @@ import sys
 import numpy as np
 from io import StringIO
 from contextlib import closing
-from collections import defaultdict
 
 from gym import Env, spaces
 
@@ -18,13 +17,13 @@ class SimpleHarvest(Env):
     Action:
         WAIT (and let apples grow)
         PICK (apples)
-        PUNISH-N (punish agent N from agents viewpoint)
+        TAG-N (tag agent N from agents viewpoint)
 
     Reward:
         WAIT: 0
-        PICK: +1 if apples_available else 0
-        PUNISH: -punish_cost
-        PUNISHED: -punished_cost
+        PICK: +1 when there is enough apples, otherwise share
+            with other agents
+        TAG: -tag_cost
 
     Example:
         3 agents, (agent0, agent1, agent2)
@@ -57,14 +56,14 @@ class SimpleHarvest(Env):
                 3,   # action agent0
                 4,   # action agent0
             ]),
-        )    
+        )
     """
 
     def __init__(
         self,
         n_agents=1,
-        punish_cost=0.0,
-        punished_cost=-2.0,
+        tag_cost=0.0,
+        tagged_length=10,
         max_apples=100,
         growth_rate=0.1,
     ):
@@ -72,8 +71,8 @@ class SimpleHarvest(Env):
 
         Arguments:
             n_agents (int): number of agents in environment
-            punish_cost (float): cost of punishing other
-            punished_cost (float): cost when being punished
+            tag_cost (float): cost of tagging other
+            tagged_length (int): time-out length when tagged
             max_apples (int): carrying capacity of apples
             growth_rate (float): growth rate in logistic growth
         """
@@ -91,7 +90,7 @@ class SimpleHarvest(Env):
                 (1, "PICK"),
             ],
             *[  # 0 is the agent that does the action
-                (i + 2, f"PUNISH-{i}")
+                (i + 2, f"TAG-{i}")
                 for i in range(self.n_agents)
             ],
         ])
@@ -110,8 +109,9 @@ class SimpleHarvest(Env):
         self.previous_rewards = np.zeros(self.n_agents)
 
         # Other
-        self.punish_cost = punish_cost
-        self.punished_cost = punished_cost
+        self.tag_cost = tag_cost
+        self.tagged_length = tagged_length
+        self.tagged_cd = np.zeros(n_agents, dtype=int)
         self.growth_rate = growth_rate
 
     @staticmethod
@@ -120,10 +120,6 @@ class SimpleHarvest(Env):
             max_apples + 1,
             *[n_agents + 2 for i in range(1, n_agents)],
         ])
-
-    def seed(self, seed=None):
-        self.np_random, seed = seeding.np_random(seed)
-        return [seed]
 
     def reset(self):
         self.t = 0
@@ -139,23 +135,26 @@ class SimpleHarvest(Env):
         ])
 
     def shift_actions(self, actions):
-        """Shift punishing actions
+        """Shift tag actions
 
-        Translate actions such that p_action=i means punish agenti
+        Translate actions such that t_action=i means tag agenti
         """
-        punishes = (actions > 1)
-        p_actions = (
+        tags = (actions > 1)
+        t_actions = (
             actions - 2 + np.arange(self.n_agents)
         ) % self.n_agents
 
         shifted_actions = actions.copy()
-        shifted_actions[punishes] = p_actions[punishes] + 2
+        shifted_actions[tags] = t_actions[tags] + 2
         return shifted_actions
-
 
     def calculate_rewards(self):
         actions = self.previous_actions.copy()
         rewards = np.zeros(self.n_agents)
+
+        # If tagged from before
+        already_tagged = (self.tagged_cd > 0)
+        actions[already_tagged] = 0
 
         # If pick apples
         attempt_pick = (actions==1)
@@ -166,18 +165,18 @@ class SimpleHarvest(Env):
             )
             rewards[attempt_pick] += pick_reward
 
-        # If punishes
-        punishes = (actions > 1)
-        rewards[punishes] += self.punish_cost
+        # If tags
+        tags = (actions > 1)
+        rewards[tags] += self.tag_cost
 
-        # If punished
+        # If tagged this round
         shifted_actions = self.shift_actions(actions.copy())
-        # Count punishments for each agent
-        i_punished, n_punishments = np.unique(
-            shifted_actions[punishes] - 2,
-            return_counts=True,
-        )
-        rewards[i_punished] += n_punishments * self.punished_cost
+        # No reward if tagged
+        i_tagged = np.unique(shifted_actions[tags] - 2)
+        self.tagged_cd[i_tagged] -= (self.tagged_cd[i_tagged] > 0)
+
+        # Reduce tagged count down
+        self.tagged_cd[already_tagged] -= 1
 
         assert all(rewards <= 1)
         
@@ -194,11 +193,11 @@ class SimpleHarvest(Env):
         if to_int:
             # Probabilistic rounding to integer
             d_population = int(d_population + np.random.rand())
-        
+
         # Update population size
         population += d_population
         return population
-        
+
 
     def update_available_apples(self):
         '''Apples picked plus logistic growth.

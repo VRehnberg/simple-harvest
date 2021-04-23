@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch import nn
 
+
 class ObservationEmbedding(nn.Module):
 
     def __init__(self, max_apples, n_agents, action_embedding_dim):
@@ -10,16 +11,16 @@ class ObservationEmbedding(nn.Module):
         self.max_apples = max_apples
         self.n_actions = n_agents + 2
         self.n_agents = n_agents
-        
+
         self.action_embedding = nn.Embedding(
             self.n_actions,
             action_embedding_dim,
         )
 
-    def forward(x):
+    def forward(self, x):
         # Scale number of apples to between -1 and 1
         x[:, 0] = 2.0 * (x[:, 0] / self.max_apples) - 1.0
-        
+
         # Encode actions
         x = torch.hstack([
             x[:, 0],
@@ -31,13 +32,17 @@ class ObservationEmbedding(nn.Module):
 
         return x
 
-class AppleAgent():
 
-    def __init__(self, max_apples, n_agents):
+class AppleAgent:
+
+    def __init__(self, max_apples: int, n_agents: int):
         self.max_apples = max_apples
         self.n_actions = n_agents + 2
         self.n_agents = n_agents
-        
+
+        self.obs = None
+        self.episode = 0
+
         # Parameter used in trainable inheriting classes
         self.training = True
 
@@ -50,10 +55,8 @@ class AppleAgent():
         return a
 
     def update(self, action, observation, reward, done):
-        self.episode += 1
-        self.previous_action = action
-        self.previous_reward = reward
         self.obs = observation
+        self.episode += 1
 
     def new_agent(self):
         pass
@@ -69,12 +72,12 @@ class AppleAgent():
 
     def __repr__(self):
         return (
-            f"{type(self).__name__}("
-            ")"
+            f"{type(self).__name__}()"
         )
 
+
 class Punisher(AppleAgent):
-    '''Punishes those that take apples when below half capacity.'''
+    """Punishes those that take apples when below half capacity."""
 
     def act(self):
         seen_apples = self.obs[0]
@@ -97,6 +100,7 @@ class Punisher(AppleAgent):
                 action = np.random.choice(took_idx)
 
         return action
+
 
 class QLearner(AppleAgent):
 
@@ -121,6 +125,8 @@ class QLearner(AppleAgent):
         self.n_states = np.prod(self.observation_dims)
         self.q_values = np.zeros([self.n_states, self.n_actions])
 
+        self.state = None
+
         # Learning parameters
         self.initial_learning_rate = learning_rate
         self.learning_rate = learning_rate
@@ -131,7 +137,7 @@ class QLearner(AppleAgent):
         self.episode = 0
 
     def observe(self, observation):
-        '''Update state from observation.'''
+        """Update state from observation."""
         observation = np.atleast_1d(observation)
         state = np.ravel_multi_index(
             observation,
@@ -147,6 +153,7 @@ class QLearner(AppleAgent):
         return action
 
     def update(self, action, observation, reward, done):
+        super().update(action, observation, reward, done)
 
         # Update states
         previous_state = self.state
@@ -170,9 +177,9 @@ class QLearner(AppleAgent):
             + self.discount * future_reward
             - self.q_values[state, action]
         )
-        
+
     def reset(self, observation):
-        '''Run when starting new game.'''
+        """Run when starting new game."""
         self.observe(observation)
 
     def new_agent(self):
@@ -184,32 +191,30 @@ class QLearner(AppleAgent):
     def __repr__(self):
         return (
             r"QLearner("
-                r"$\alpha$="f"{self.learning_rate:.3g}"
-                #r",$\gamma$="f"{self.discount:.3g}"
-                r",$\varepsilon$="f"{self.initial_epsilon:.3g}"
+            r"$\alpha$="f"{self.learning_rate:.3g}"
+            r",$\varepsilon$="f"{self.initial_epsilon:.3g}"
             ")"
         )
 
+
 class MLAgent(nn.Module, AppleAgent):
-    '''PyTorch based agent.'''
+    """PyTorch based agent."""
 
-    def __init__(self, observation_space, action_embedding_dim=5):
-        super().__init__()
+    def __init__(self, max_apples, n_agents, action_embedding_dim=5):
+        super().__init__(max_apples, n_agents)
 
+        self.action_embedding_dim = action_embedding_dim
         self.observation_embedding = ObservationEmbedding(
-            observation_space,
-            action_embedding_dim,
+            self.max_apples,
+            self.n_agents,
+            self.action_embedding_dim,
         )
 
     def new_agent(self):
         # Reinitialize observation embedding
         for layer in self.observation_embedding.children():
-           if hasattr(layer, 'reset_parameters'):
-               layer.reset_parameters()
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
 
     def forward(self):
         raise NotImplementedError
-
-    def train(self, mode=True):
-        super().train(mode=mode)
-        return self

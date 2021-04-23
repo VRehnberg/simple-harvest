@@ -1,23 +1,21 @@
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-from tqdm import trange, tqdm
+from tqdm import trange
 
 from simple_harvest import SimpleHarvest
 from agents import AppleAgent, Punisher, QLearner
 from metrics import GiniRewards, GiniApples
 
-# Debugging
-from IPython import embed
-import pdb
-
 PAPER = True
 if PAPER:
     import seaborn as sns
+
     sns.set_context("paper", font_scale=1.5)
     sns.set_style("darkgrid")
     sns.set_palette("deep")
     sns.set(font='sans-serif')
+
 
 def visualize_growth():
     log_growth = SimpleHarvest.logistic_growth
@@ -40,26 +38,27 @@ def visualize_growth():
 
         # Plot results
         label = f"$r={x_growth_rate:.2g}$"
-        ax.plot(population, d_population, label=label)[0]
+        ax.plot(population, d_population, label=label)
 
-    ax.set_xlabel("Relative population $P/K$")
-    ax.set_ylabel("Relative population growth $\Delta P/K$")
+    ax.set_xlabel(r"Relative population $P/K$")
+    ax.set_ylabel(r"Relative population growth $\Delta P/K$")
     ax.legend()
-    
+
     return fig
 
+
 def train_agents(
-    env,
-    agents,
-    n_epochs=100,
-    t_max=1000,
-    plot=True,
-    metrics=[],
+        env,
+        agents,
+        n_epochs=100,
+        t_max=1000,
+        plot=True,
+        metrics=tuple(),
 ):
-    '''Train agents for some epochs.'''
+    """Train agents for some epochs."""
 
     n_agents = env.n_agents
-    
+
     if plot:
         # Axis
         if metrics:
@@ -113,15 +112,15 @@ def train_agents(
         fig.tight_layout()
 
     # Training loop
-    for epoch in trange(n_epochs, desc="Epoch"):
+    for epoch in trange(n_epochs, desc="Train"):
 
         # Reset
-        obs = env.reset()
+        env.reset()
         for i_agent, agent in enumerate(agents):
             obs = env.get_obs(i_agent)
             agent.reset(obs)
             agent.train()
-        
+
         for metric in metrics:
             metric.reset()
 
@@ -152,21 +151,21 @@ def train_agents(
                 ax.plot(epoch, rewards.sum(), 'k.')
             for reward, col in zip(rewards, colors):
                 ax.plot(epoch, reward, '.', c=col)
-            
+
             # Add metrics
             for metric, col in zip(metrics, colors_metric):
                 ax_metric.plot(epoch, metric.value, '.', c=col)
 
             # Update plot
             plt.pause(0.01)
-        
+
 
 def run_example(env, agents, t_max=100, render=True):
-    '''Run a single game with a maximal length.'''
-    
+    """Run a single game with a maximal length."""
+
     n_agents = env.n_agents
-    
-    obs = env.reset()
+
+    env.reset()
     for i_agent, agent in enumerate(agents):
         obs = env.get_obs(i_agent)
         agent.reset(obs)
@@ -197,8 +196,8 @@ def run_example(env, agents, t_max=100, render=True):
     for agent, avg_reward in zip(agents, avg_rewards):
         print(f"Reward for {agent}: {avg_reward:.4g}")
 
-def main():
 
+def main():
     # Example run
     qwargs = dict(
         discount=0.95,
@@ -208,8 +207,8 @@ def main():
     agent_parameters = [
         # Agent, n, args, kwargs
         (AppleAgent, 0, {}),  # random agents
-        (Punisher,   1, {}),
-        (QLearner,   2, qwargs),
+        (Punisher, 1, {}),
+        (QLearner, 2, qwargs),
     ]
     n_agents = sum(n for _, n, _ in agent_parameters)
     max_apples = 20 * n_agents
@@ -223,11 +222,10 @@ def main():
         for Agent, n, kwargs in agent_parameters
         for _ in range(n)
     ]
-    metrics = [GiniRewards(n_agents), GiniApples(n_agents)]
+    metrics = (GiniRewards(n_agents), GiniApples(n_agents))
     train_agents(env, agents, metrics=metrics)
     run_example(env, agents, render=False)
-#     embed()
-    
+
     # Visualize apple population logistic growth
     sns.set(font_scale=1.5)
     fig = visualize_growth()
@@ -235,7 +233,8 @@ def main():
     fig.savefig("growth_rate.pdf", bbox_inches="tight")
     sns.set(font_scale=0.6666)
 
-#     plt.show()
+    plt.show()
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     main()
