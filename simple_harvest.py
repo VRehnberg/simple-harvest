@@ -5,6 +5,9 @@ from contextlib import closing
 
 from gym import Env, spaces
 
+from utils import logistic_growth
+
+
 class SimpleHarvest(Env):
     """Simplified version of the Harvest Game in arXiv:1803.08884.
 
@@ -182,29 +185,13 @@ class SimpleHarvest(Env):
         
         return rewards
 
-    @staticmethod
-    def logistic_growth(population, growth_rate, capacity, to_int=True):
-        '''dP / dt = r * P * (1 - P / K)'''
-        # Calculate population growth
-        d_population = growth_rate * population * (
-            1 - population / capacity
-        )
-
-        if to_int:
-            # Probabilistic rounding to integer
-            d_population = int(d_population + np.random.rand())
-
-        # Update population size
-        population += d_population
-        return population
-
 
     def update_available_apples(self):
-        '''Apples picked plus logistic growth.
+        """Apples picked plus logistic growth.
 
         Differential equation for logistic growth
             dP / dt = r * P * (1 - P / K)
-        '''
+        """
         actions = self.previous_actions.copy()
         if any(
             action not in self.action_space
@@ -218,14 +205,14 @@ class SimpleHarvest(Env):
         self.available_apples = max(0, self.available_apples)
 
         # Logistic growth
-        self.available_apples = self.logistic_growth(
+        self.available_apples = logistic_growth(
             population=self.available_apples,
             growth_rate=self.growth_rate,
             capacity=self.max_apples,
         )
 
     def step(self, *actions):
-        "Actions given as tuple"
+        """Actions given as tuple."""
 
         if len(actions) != self.n_agents:
             raise ValueError(

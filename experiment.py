@@ -6,6 +6,7 @@ from tqdm import trange
 from simple_harvest import SimpleHarvest
 from agents import AppleAgent, Punisher, QLearner
 from metrics import GiniRewards, GiniApples
+from utils import policy_iteration
 
 PAPER = True
 if PAPER:
@@ -199,7 +200,7 @@ def run_example(env, agents, t_max=100, render=True):
 
 def main():
     # Example run
-    qwargs = dict(
+    kwargs = dict(
         discount=0.95,
         epsilon=0.2,
         epsilon_rate=0.05,
@@ -208,7 +209,7 @@ def main():
         # Agent, n, args, kwargs
         (AppleAgent, 0, {}),  # random agents
         (Punisher, 1, {}),
-        (QLearner, 2, qwargs),
+        (QLearner, 2, kwargs),
     ]
     n_agents = sum(n for _, n, _ in agent_parameters)
     max_apples = 20 * n_agents
@@ -223,15 +224,19 @@ def main():
         for _ in range(n)
     ]
     metrics = (GiniRewards(n_agents), GiniApples(n_agents))
-    train_agents(env, agents, metrics=metrics)
-    run_example(env, agents, render=False)
+    #train_agents(env, agents, metrics=metrics)
+    #run_example(env, agents, render=False)
 
     # Visualize apple population logistic growth
-    sns.set(font_scale=1.5)
-    fig = visualize_growth()
-    fig.tight_layout()
-    fig.savefig("growth_rate.pdf", bbox_inches="tight")
-    sns.set(font_scale=0.6666)
+    # sns.set(font_scale=1.5)
+    # fig = visualize_growth()
+    # fig.tight_layout()
+    # fig.savefig("growth_rate.pdf", bbox_inches="tight")
+    # sns.set(font_scale=0.6666)
+
+    # Visualize policy
+    q_matrix = policy_iteration(growth_rate=env.growth_rate, max_apples=20, discount=kwargs["discount"])
+    print(q_matrix)
 
     plt.show()
 
