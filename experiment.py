@@ -2,11 +2,12 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import trange
+from matplotlib.patches import Patch
 
 from simple_harvest import SimpleHarvest
 from agents import AppleAgent, Punisher, QLearner
 from metrics import GiniRewards, GiniApples
-from utils import policy_iteration
+from utils import logistic_growth, policy_iteration
 
 PAPER = True
 if PAPER:
@@ -19,7 +20,6 @@ if PAPER:
 
 
 def visualize_growth():
-    log_growth = SimpleHarvest.logistic_growth
 
     # Parameters
     capacity = 1
@@ -29,7 +29,7 @@ def visualize_growth():
     fig, ax = plt.subplots()
     for x_growth_rate in growth_rate:
         # Calculate logistic growth
-        new_population = log_growth(
+        new_population = logistic_growth(
             population.copy(),
             x_growth_rate,
             capacity,
@@ -201,7 +201,7 @@ def run_example(env, agents, t_max=100, render=True):
 def main():
     # Example run
     kwargs = dict(
-        discount=0.95,
+        discount=0.98,
         epsilon=0.2,
         epsilon_rate=0.05,
     )
@@ -224,19 +224,43 @@ def main():
         for _ in range(n)
     ]
     metrics = (GiniRewards(n_agents), GiniApples(n_agents))
-    #train_agents(env, agents, metrics=metrics)
-    #run_example(env, agents, render=False)
+    train_agents(env, agents, metrics=metrics)
+    run_example(env, agents, render=False)
 
     # Visualize apple population logistic growth
-    # sns.set(font_scale=1.5)
-    # fig = visualize_growth()
-    # fig.tight_layout()
-    # fig.savefig("growth_rate.pdf", bbox_inches="tight")
-    # sns.set(font_scale=0.6666)
+    sns.set(font_scale=1.5)
+    fig = visualize_growth()
+    fig.tight_layout()
+    fig.savefig("growth_rate.pdf", bbox_inches="tight")
+    sns.set(font_scale=0.6666)
 
     # Visualize policy
-    q_matrix = policy_iteration(growth_rate=env.growth_rate, max_apples=20, discount=kwargs["discount"])
-    print(q_matrix)
+    max_apples = 20
+    population = np.linspace(0, max_apples, max_apples + 1)
+    growth_rates = np.linspace(0.05, 1, 20) / (max_apples / 4)
+    discount = 0.98
+    policies = np.zeros([growth_rates.size, population.size])
+    for i, growth_rate in enumerate(growth_rates):
+        q_matrix = policy_iteration(growth_rate, max_apples, discount)
+        policy = q_matrix.argmax(axis=1)
+        policies[i, :] = policy
+
+    X, Y = np.meshgrid(population, growth_rates)
+
+    sns.set(font_scale=1.5)
+    fig, ax = plt.subplots()
+    image = ax.pcolormesh(X, Y, policies, cmap="bwr", edgecolors="w", shading="nearest", lw=0.5)
+    legend_entries = zip(*[
+        (Patch(facecolor=image.cmap(float(a)), edgecolor='w'), env.action_meanings[a])
+        for a in [0, 1]
+    ])
+    ax.legend(*legend_entries)
+    ax.set_xlabel("Number of apples, $P$")
+    ax.set_ylabel("Growth rate, $r$")
+    fig.tight_layout()
+    fig.savefig("policy_grid.pdf", bbox_inches="tight")
+    sns.set(font_scale=0.6666)
+
 
     plt.show()
 

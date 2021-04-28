@@ -95,10 +95,9 @@ def policy_iteration(growth_rate, max_apples, discount, tag_cost=0.0, tagged_len
     values[0] = 0
     fixed_values[0] = True
 
-    # Policy for P>K/2 is known
-    i_middle = max_apples // 2
-    policy[i_middle + 1:] = 1
-    fixed_policy[i_middle + 1:] = True
+    # Policy for P=K is known
+    policy[-1] = 1
+    fixed_policy[-1] = True
 
     # Check if you can go all out anywhere
     sufficient_growth = (transition_probabilities >= 1.0)
@@ -115,7 +114,7 @@ def policy_iteration(growth_rate, max_apples, discount, tag_cost=0.0, tagged_len
 
         # Add 0-1 transition values
         zero_mask = (policy == 0)
-        one_mask  = (policy == 1)
+        one_mask = (policy == 1)
         is_transition = np.logical_and(zero_mask[:-1], one_mask[1:])
         i_transitions = np.nonzero(is_transition)
         for i in i_transitions:
@@ -133,13 +132,16 @@ def policy_iteration(growth_rate, max_apples, discount, tag_cost=0.0, tagged_len
 
             action = policy[state]
 
-            population = state if action != 1 else state - 1
-            p = transition_probabilities[population]
-
-            if action==0:
-                value = (discount * p / (1 - discount * (1 - p))) * get_value(state + 1)
-            elif action==1:
-                value = (discount * (1 - p) / (1 - discount * p)) * get_value(state - 1)
+            if action == 0:
+                p = transition_probabilities[state]
+                next_value = get_value(state + 1) if p > 0 else 0
+                value = (discount * p * next_value) / (1 - discount * (1 - p))
+            elif action == 1:
+                p = transition_probabilities[state - 1]
+                next_value = get_value(state - 1)
+                value = (1 + discount * (1 - p) * next_value) / (1 - discount * p)
+            else:
+                raise NotImplementedError
 
             values[state] = value
             updated_values[state] = True
@@ -148,29 +150,30 @@ def policy_iteration(growth_rate, max_apples, discount, tag_cost=0.0, tagged_len
 
         for state in range(n_states):
             get_value(state)
-            #TODO values are wrong, see debugger
-            raise NotImplementedError
 
     def get_q_values(values):
         q_values = np.zeros([values.size, 2])
-        q_values[1:, 1] += 1
-        q_values[1:, :] += discount * (
-            np.dot(1 - transition_probabilities[1:], values[1:])
-            + np.dot(transition_probabilities[:-1], values[1:])
+        q_values[1:, 0] = discount * (
+                transition_probabilities[1:] * np.hstack([values[2:], 0])
+                + (1 - transition_probabilities[1:]) * values[1:]
         )
-        #TODO this is wrong
-        raise NotImplementedError
+        q_values[1:, 1] += 1.0 + q_values[:-1, 0]
+        # TODO q_values for action 2
+        assert q_values[-1, 0] < q_values[-1, 1]
         return q_values
 
     policy_converged = False
+    known_best_actions = policy.copy()[fixed_policy]
     while not policy_converged:
-
         # Compute values
+        old_values = values.copy()
         update_values()
+        assert (values >= old_values).all(), f"{np.diff(values - old_values)}"
 
         # Compute policy
         old_policy = policy.copy()
         policy = get_q_values(values).argmax(axis=1)
         policy_converged = (old_policy == policy).all()
+    assert (known_best_actions == policy[fixed_policy]).all()
 
     return get_q_values(values)
