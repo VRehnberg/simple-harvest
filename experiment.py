@@ -77,8 +77,8 @@ def train_agents(
         # Theoretical maximum and legend
         cap = env.max_apples
         rate = env.growth_rate
-        satmax = (t_max - cap / 2) * rate * cap / 4 + cap / 2
-        ax.axhline(satmax, ls="--", c="k", label="SATMax")
+        max_efficiency = (t_max - cap / 2) * rate * cap / 4 + cap / 2
+        ax.axhline(max_efficiency, ls="--", c="k", label="Max")
         colors = []
         for agent in agents:
             p = ax.plot(-10, cap / 2, ".", label=repr(agent))
@@ -201,15 +201,17 @@ def run_example(env, agents, t_max=100, render=True):
 def main():
     # Example run
     kwargs = dict(
+        learning_rate=1.0,
+        learning_rate_change=0.01,
         discount=0.98,
         epsilon=0.2,
-        epsilon_rate=0.05,
+        epsilon_change=0.05,
     )
     agent_parameters = [
         # Agent, n, args, kwargs
         (AppleAgent, 0, {}),  # random agents
-        (Punisher, 1, {}),
-        (QLearner, 2, kwargs),
+        (Punisher, 0, {}),
+        (QLearner, 3, kwargs),
     ]
     n_agents = sum(n for _, n, _ in agent_parameters)
     max_apples = 20 * n_agents
