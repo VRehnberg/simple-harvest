@@ -168,7 +168,7 @@ def policy_iteration(growth_rate, max_apples, discount, tag_cost=0.0, tagged_len
         # Compute values
         old_values = values.copy()
         update_values()
-        assert (values >= old_values).all(), f"{np.diff(values - old_values)}"
+        assert np.logical_or(values > old_values, np.isclose(values, old_values)).all(), f"{values - old_values}"
 
         # Compute policy
         old_policy = policy.copy()

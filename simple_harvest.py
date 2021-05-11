@@ -89,11 +89,11 @@ class SimpleHarvest(Env):
         self.n_agents = n_agents
         self.action_meanings = dict([
             *[
-                (0, "NOOP"),
-                (1, "PICK"),
+                (0, "Wait"),
+                (1, "Pick"),
             ],
             *[  # 0 is the agent that does the action
-                (i + 2, f"TAG-{i}")
+                (i + 2, f"Tag-{i}")
                 for i in range(self.n_agents)
             ],
         ])

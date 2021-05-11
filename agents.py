@@ -58,7 +58,8 @@ class AppleAgent:
         self.obs = observation
         self.episode += 1
 
-    def new_agent(self):
+    def reinitialize(self):
+        self.episode = 0
         pass
 
     def train(self, mode=True):
@@ -149,7 +150,8 @@ class QLearner(AppleAgent):
 
     def act(self):
         if np.random.rand() > self.epsilon:
-            action = np.argmax(self.q_values[self.state, :])
+            q = self.q_values[self.state, :]
+            action = np.random.choice(np.flatnonzero(q == q.max()))
         else:
             action = np.random.choice(self.n_actions)
         return action
@@ -187,8 +189,8 @@ class QLearner(AppleAgent):
         """Run when starting new game."""
         self.observe(observation)
 
-    def new_agent(self):
-        self.episode = 0
+    def reinitialize(self):
+        super().reinitialize()
         self.learning_rate = self.initial_learning_rate
         self.epsilon = self.initial_epsilon
         self.q_values = np.zeros([self.n_states, self.n_actions])
@@ -215,7 +217,8 @@ class MLAgent(nn.Module, AppleAgent):
             self.action_embedding_dim,
         )
 
-    def new_agent(self):
+    def reinitialize(self):
+        super().reinitialize()
         # Reinitialize observation embedding
         for layer in self.observation_embedding.children():
             if hasattr(layer, 'reset_parameters'):
