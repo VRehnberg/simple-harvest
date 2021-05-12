@@ -129,6 +129,7 @@ class SimpleHarvest(Env):
         self.available_apples = self.initial_apples
         self.previous_actions = np.zeros(self.n_agents, dtype=int)
         self.previous_rewards = np.zeros(self.n_agents)
+        self.tagged_cd = np.zeros(self.n_agents, dtype=int)
         return self.get_obs()
 
     def get_obs(self, agent=0):
@@ -174,9 +175,13 @@ class SimpleHarvest(Env):
 
         # If tagged this round
         shifted_actions = self.shift_actions(actions.copy())
-        # No reward if tagged
+        assert (shifted_actions[tags] > 1).all()
         i_tagged = np.unique(shifted_actions[tags] - 2)
-        self.tagged_cd[i_tagged] -= (self.tagged_cd[i_tagged] > 0)
+        mask = np.zeros_like(self.tagged_cd, dtype=bool)
+        mask[i_tagged] = True
+        mask &= ~already_tagged
+        assert (self.tagged_cd[mask] == 0).all()
+        self.tagged_cd[mask] += self.tagged_length
 
         # Reduce tagged count down
         self.tagged_cd[already_tagged] -= 1
@@ -184,7 +189,6 @@ class SimpleHarvest(Env):
         assert all(rewards <= 1)
         
         return rewards
-
 
     def update_available_apples(self):
         """Apples picked plus logistic growth.
@@ -200,7 +204,6 @@ class SimpleHarvest(Env):
             raise ValueError("Actions outside action space.")
 
         # Picked apples
-        attempt_pick = (actions==1)
         self.available_apples -= (actions==1).sum()
         self.available_apples = max(0, self.available_apples)
 
@@ -222,12 +225,20 @@ class SimpleHarvest(Env):
     
         done = False
         self.t += 1
-        self.previous_actions = np.array(actions)
+        actions = np.array(actions)
+        actions[self.tagged_cd > 0] = 0
+        self.previous_actions = actions
         info = {
             f"action{i_agent}": action
             for i_agent, action
             in enumerate(actions)
         }
+
+        # Add if agent was free to choose action or tagged to info
+        if self.t==1:
+            assert (self.tagged_cd==0).all()
+        for i_agent in range(self.n_agents):
+            info[f"was_tagged{i_agent}"] = self.tagged_cd[i_agent] > 0
 
         # Get rewards
         rewards = self.calculate_rewards()
@@ -235,7 +246,11 @@ class SimpleHarvest(Env):
         reward = rewards[0]
         for i_agent in range(self.n_agents):
             info[f"reward{i_agent}"] = rewards[i_agent]
-        
+
+        # Add number of apples picked to info dict
+        n_pick_attempts = (actions == 1).sum()
+        info["n_picked_apples"] = min(n_pick_attempts, self.available_apples)
+
         # Update number of apples
         self.update_available_apples()
         if self.available_apples==0:

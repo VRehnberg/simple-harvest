@@ -2,11 +2,12 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker, lines, offsetbox
-from tqdm import trange, tqdm
+from tqdm import tqdm
+from scipy import stats
 
 from simple_harvest import SimpleHarvest
 from agents import AppleAgent, Punisher, QLearner
-from metrics import GiniRewards, GiniApples
+from metrics import GiniRewards, GiniApples, Efficiency, Aggressiveness, GiniTagged, SelfHarm, GiniMetric
 from utils import logistic_growth, policy_iteration
 
 PAPER = True
@@ -78,7 +79,7 @@ def train_agents(
         # Theoretical maximum and legend
         cap = env.max_apples
         rate = env.growth_rate
-        max_efficiency = (t_max - cap / 2) * rate * cap / 4 + cap / 2
+        max_efficiency = t_max * rate * cap / 4
         ax.axhline(max_efficiency, ls="--", c="k", label="Max")
         colors = []
         for agent in agents:
@@ -94,6 +95,8 @@ def train_agents(
             fancybox=True,
             shadow=True,
         )
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+        ax.autoscale(enable=False)
 
         # Metrics
         colors_metric = []
@@ -110,6 +113,7 @@ def train_agents(
                 fancybox=True,
                 shadow=True,
             )
+            ax_metric.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
 
         fig.tight_layout()
 
@@ -201,24 +205,35 @@ def train_agents(
             plt.pause(0.01)
 
     if plot and (n_trials > 1):
-        rewards = all_rewards.mean(axis=0)
-        metrics = all_metrics.mean(axis=0)
-
         # Sort rewards
-        agent_names = np.array([repr(agent) for agent in agents], dtype=object)
-        for agent_type in np.unique(agent_names):
-            i_agents = np.flatnonzero(agent_names == agent_type)
-            i_sort = i_agents[np.argsort(rewards[i_agents, -1])[::-1]]
-            rewards[i_agents, :] = rewards[i_sort, :]
+        for trial in range(n_trials):
+            rewards = all_rewards[trial, :, :]
+            agent_names = np.array([repr(agent) for agent in agents], dtype=object)
+            for agent_type in np.unique(agent_names):
+                i_agents = np.flatnonzero(agent_names == agent_type)
+                i_sort = i_agents[np.argsort(rewards[i_agents, -1])[::-1]]
+                rewards[i_agents, :] = rewards[i_sort, :]
+            all_rewards[trial, :, :] = rewards
+
+        def mean_ci(values):
+            mean = values.mean(axis=0)
+            ci = stats.norm.interval(0.95, loc=values.mean(axis=0), scale=(values).std(axis=0).mean(axis=0))
+            ci = (np.stack(ci, axis=1) - mean[:, np.newaxis, :]).abs()
+            return mean, ci
+        rewards_mean, rewards_ci = mean_ci(all_rewards)
+        metrics_mean, metrics_ci = mean_ci(all_metrics)
+
+        def plot_summary(ax, x, y, yerr, col, n, **kwargs):
+            for i in range(n):
+                ax.errorbar(x, y[i, :], yerr[i, :], fmt="-", c=col[i], capsize=2)
 
         if n_agents > 1:
-            ax.plot(epochs, rewards.sum(axis=0), '-k')
-        for i_agent in range(n_agents):
-            ax.plot(epochs, rewards[i_agent, :], '-', c=colors[i_agent])
+            r_sum_mean, r_sum_ci = mean_ci(all_rewards.sum(axis=1))
+            r_sum_ci = r_sum_ci.T
+            ax.errorbar(epochs, r_sum_mean, r_sum_ci, fmt='-k', capsize=2)
 
-        # Add metrics
-        for i_metric in range(n_metrics):
-            ax_metric.plot(epochs, metrics[i_metric, :], '-', c=colors_metric[i_metric])
+        plot_summary(ax, epochs, rewards_mean, rewards_ci, colors, n_agents)
+        plot_summary(ax_metric, epochs, metrics_mean, metrics_ci, colors_metric, n_metrics)
 
         plt.pause(0.01)
 
@@ -275,22 +290,35 @@ def main():
         # Agent, n, args, kwargs
         (AppleAgent, 0, {}),  # random agents
         (Punisher, 0, {}),
-        (QLearner, 3, kwargs),
+        (QLearner, 1, kwargs),
     ]
     n_agents = sum(n for _, n, _ in agent_parameters)
+    growth_rate = 0.15
     max_apples = 20 * n_agents
+    n_trials = 10
+    n_epochs = 50
+    t_max = 1000
     env = SimpleHarvest(
         n_agents=n_agents,
+        growth_rate=growth_rate,
         max_apples=max_apples,
-        growth_rate=0.05,
     )
     agents = [
         Agent(max_apples, n_agents, **kwargs)
         for Agent, n, kwargs in agent_parameters
         for _ in range(n)
     ]
-    metrics = (GiniRewards(n_agents), GiniApples(n_agents))
-    train_agents(env, agents, n_trials=10, metrics=metrics)
+    metrics = (
+        GiniRewards(n_agents),
+        GiniApples(n_agents),
+        Efficiency(growth_rate, max_apples, t_max),
+        Aggressiveness(n_agents),
+        GiniTagged(n_agents),
+        SelfHarm(n_agents),
+    )
+    if n_agents == 1:
+        metrics = [m for m in metrics if not isinstance(m, GiniMetric)]
+    train_agents(env, agents, metrics=metrics, n_trials=n_trials, n_epochs=n_epochs, t_max=t_max)
     run_example(env, agents, render=False)
 
     # Visualize apple population logistic growth
