@@ -2,7 +2,7 @@ import time
 import itertools
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import ticker, lines, offsetbox
+from matplotlib import ticker, lines, offsetbox, colors, cm
 from tqdm import tqdm
 from scipy import stats
 
@@ -57,23 +57,12 @@ def get_markers_metric():
     return itertools.cycle(["o", "s", "X", "D", "v", "^", "<", ">"])
 
 
-def train_agents(
-        env,
-        agents,
-        n_trials=1,
-        n_epochs=20,
-        t_max=1000,
-        plot=True,
-        metrics=tuple(),
-):
-    """Train agents for some epochs."""
+class TrainPlotter:
 
-    n_agents = env.n_agents
-    n_metrics = len(metrics)
-
-    # Initialize axes and legends
-    if plot:
+    def __init__(self, env, n_epochs, t_max, agents, metrics):
         # Axis
+        n_agents = len(agents)
+        n_metrics = len(metrics)
         if metrics:
             fig, (ax, ax_metric) = plt.subplots(1, 2, figsize=(12, 4.8))
             ax_metric.set_xlim([0, n_epochs - 1])
@@ -89,12 +78,12 @@ def train_agents(
         rate = env.growth_rate
         max_efficiency = t_max * rate * cap / 4
         ax.axhline(max_efficiency, ls="--", c="k", label="Max")
-        colors = []
+        colors_reward = []
         markers = get_markers()
         for agent in agents:
             m = next(markers)
             p = ax.plot(-10, max_efficiency / n_agents, f"{m}-", label=repr(agent))
-            colors.append(p[0].get_color())
+            colors_reward.append(p[0].get_color())
         if n_agents > 1:
             ax.plot(-10, max_efficiency, "P-k", label=f"Sum")
         ax.legend(
@@ -132,6 +121,210 @@ def train_agents(
             ax_metric.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
 
         fig.tight_layout()
+
+        self.agents = agents
+        self.metrics = metrics
+        self.n_agents = n_agents
+        self.n_metrics = n_metrics
+
+        self.fig = fig
+        self.ax = ax
+        self.ax_metric = ax_metric
+
+        self.tmp_points = []
+        self.colors_reward = colors_reward
+        self.colors_metric = colors_metric
+
+    def update(self, epoch, rewards):
+        if self.n_agents > 1:
+            p = self.ax.plot(epoch, rewards.sum(), '+k')
+            self.tmp_points.extend(p)
+        for reward, col in zip(rewards, self.colors_reward):
+            p = self.ax.plot(epoch, reward, '.', c=col)
+            self.tmp_points.extend(p)
+
+        # Add metrics
+        for metric, col in zip(self.metrics, self.colors_metric):
+            p = self.ax_metric.plot(epoch, metric.value, '.', c=col)
+            self.tmp_points.extend(p)
+
+    def finalize_trial(self, epochs, rewards, alpha=1.0):
+        for p in self.tmp_points:
+            p.remove()
+        self.tmp_points = []
+        #rewards = all_rewards[trial, i_agents, -1]
+
+        # Sort rewards
+        agent_names = np.array([repr(agent) for agent in self.agents], dtype=object)
+        for agent_type in np.unique(agent_names):
+            i_agents = np.flatnonzero(agent_names == agent_type)
+            i_sort = i_agents[np.argsort(rewards[i_agents, -1])[::-1]]
+            rewards[i_agents, :] = rewards[i_sort, :]
+
+        kws = dict(alpha=alpha, ms=4)
+        if self.n_agents > 1:
+            self.ax.plot(epochs, rewards.sum(axis=0), 'P-k', **kws)
+        markers = get_markers()
+        for i_agent in range(self.n_agents):
+            m = next(markers)
+            self.ax.plot(epochs, rewards[i_agent, :], f'{m}-', c=self.colors_reward[i_agent], **kws)
+
+        # Add metrics
+        markers_metric = get_markers_metric
+        for i_metric in range(self.n_metrics):
+            col = self.colors_metric[i_metric]
+            m = next(markers_metric)
+            self.ax_metric.plot(epochs, self.metrics[i_metric, :], f'{m}-', c=col, alpha=alpha)
+
+    def summarize(self, epochs, all_rewards, all_metrics):
+        # Sort rewards
+        n_trials = all_rewards.shape[0]
+        for trial in range(n_trials):
+            rewards = all_rewards[trial, :, :]
+            agent_names = np.array([repr(agent) for agent in self.agents], dtype=object)
+            for agent_type in np.unique(agent_names):
+                i_agents = np.flatnonzero(agent_names == agent_type)
+                i_sort = i_agents[np.argsort(rewards[i_agents, -1])[::-1]]
+                rewards[i_agents, :] = rewards[i_sort, :]
+            all_rewards[trial, :, :] = rewards
+
+        def mean_ci(values):
+            mean = values.mean(axis=0)
+            ci = stats.norm.interval(0.95, loc=values.mean(axis=0), scale=(values).std(axis=0).mean(axis=0))
+            ci = np.stack(ci, axis=1)
+            return mean, ci
+
+        if self.n_agents > 1:
+            r_sum_mean, r_sum_ci = mean_ci(all_rewards.sum(axis=1, keepdims=True))
+        rewards_mean, rewards_ci = mean_ci(all_rewards)
+        metrics_mean, metrics_ci = mean_ci(all_metrics)
+
+        def plot_summary(ax, x, y, y_ci, cols, markers, n, **kwargs):
+            cols = itertools.cycle(cols)
+            for i in range(n):
+                c = next(cols)
+                m = next(markers)
+                ax.plot(x, y[i, :], c=c, marker=m, mec="k", **kwargs)
+                ax.fill_between(x, y_ci[i, 0, :], y_ci[i, 1, :], fc=c, ec=c, alpha=0.5, **kwargs)
+
+        kws = dict()
+        if self.n_agents > 1:
+            plot_summary(self.ax, epochs, r_sum_mean, r_sum_ci, ['k'], iter(["P"]), 1, **kws)
+        plot_summary(
+            ax=self.ax,
+            x=epochs,
+            y=rewards_mean,
+            y_ci=rewards_ci,
+            cols=self.colors_reward,
+            markers=get_markers(),
+            n=self.n_agents,
+            **kws,
+        )
+        plot_summary(
+            ax=self.ax_metric,
+            x=epochs,
+            y=metrics_mean,
+            y_ci=metrics_ci,
+            cols=self.colors_metric,
+            markers=get_markers_metric(),
+            n=self.n_metrics,
+            **kws,
+        )
+
+
+class QValuePlotter:
+
+    def __init__(self, env, n_trials, agents):
+        n_agents = len(agents)
+        max_apples = env.max_apples
+        n_combos = 2 ** n_agents
+        n_actions = env.action_space.n
+        q_learners = [agent for agent in agents if isinstance(agent, QLearner)]
+        n_q_learners = len(q_learners)
+        grid = np.zeros([n_trials, (max_apples // 2) + 1, n_combos, n_actions, n_q_learners])
+
+        self.n_trials = n_trials
+        self.n_actions = n_actions
+        self.agents = agents
+        self.n_agents = n_agents
+        self.q_learners = q_learners
+        self.grid = grid
+
+    @property
+    def grid_3d(self):
+        shape = self.grid.shape
+        new_shape = (shape[0], shape[1] * shape[3], shape[2] * shape[4])
+        grid_3d = np.moveaxis(self.grid, [1, 2, 3, 4], [1, 3, 2, 4]).reshape(*new_shape)
+        return grid_3d
+
+    def update(self, trial):
+        for i_q_learner, agent in enumerate(self.q_learners):
+            q_values = agent.q_values.copy()
+            for n_apples in range(self.grid.shape[1]):
+                for i_combo, actions in enumerate(itertools.product([0, 1], repeat=self.n_agents)):
+                    mask = np.array([agent2 is not agent for agent2 in self.agents])
+                    obs = np.hstack([n_apples, *np.array(actions)[mask]])
+                    state = agent.observe_(obs)
+                    self.grid[trial, n_apples, i_combo, :, i_q_learner] = q_values[state, :]
+
+    def plot(self):
+        with sns.axes_style("white"):
+            fig, axs = plt.subplots(self.n_trials, 1, figsize=(12, self.n_trials * 1.2))
+
+        if self.grid.min() < 0.0:
+            norm = colors.TwoSlopeNorm(vmin=self.grid.min(), vcenter=0.0, vmax=self.grid.max())
+        else:
+            norm = colors.TwoSlopeNorm(vmin=0.0 - 1e-5, vcenter=0.0, vmax=self.grid.max())
+        cmap = sns.color_palette("vlag", as_cmap=True)
+        grid_3d = self.grid_3d
+        xticks = (self.n_actions * np.arange(self.grid.shape[1] + 1)) - 0.5
+        yticks = (len(self.q_learners) * np.arange(self.grid.shape[3] + 1)) - 0.5
+        for trial, ax in enumerate(axs):
+            # Plot
+            grid_2d = grid_3d[trial, :, :]
+            ax.pcolor(grid_2d.T, ec="w", lw=0.5, cmap=cmap, norm=norm)
+
+            # Modify ticks
+            for sub_axis, ticks in zip([ax.xaxis, ax.yaxis], [xticks, yticks]):
+                sub_axis.set_major_locator(ticker.FixedLocator(ticks))
+                sub_axis.set_major_formatter(ticker.NullFormatter())
+                centered_ticks = (ticks[1:] + ticks[:-1]) / 2
+                sub_axis.set_minor_locator(ticker.FixedLocator(centered_ticks))
+                sub_axis.set_minor_formatter(ticker.FixedFormatter(centered_ticks))
+            ax.yaxis.set_minor_formatter(ticker.FixedFormatter([
+                f'({", ".join(combo)})' for combo in itertools.product(["0", "1"], repeat=2)
+            ]))
+            ax.tick_params(which="major", direction="out", length=2, color="k")
+
+            # Axis labels
+            ax.set_ylabel("Previous actions")
+        ax.set_xlabel("Available apples")
+
+        # Colorbar
+        cbar = fig.colorbar(cm.ScalarMappable(cmap=cmap, norm=norm), ax=axs, location="right", fraction=0.07)
+        cbar.set_label("Q-value")
+
+        fig.tight_layout()
+
+
+def train_agents(
+        env,
+        agents,
+        n_trials=1,
+        n_epochs=20,
+        t_max=1000,
+        plot=True,
+        metrics=tuple(),
+):
+    """Train agents for some epochs."""
+
+    n_agents = env.n_agents
+    n_metrics = len(metrics)
+
+    # Initialize axes and legends
+    if plot:
+        train_plotter = TrainPlotter(env, n_epochs, t_max, agents, metrics)
+        q_value_plotter = QValuePlotter(env, n_trials, agents)
 
     # Training loops
     epochs = range(n_epochs)
@@ -178,88 +371,22 @@ def train_agents(
 
             all_rewards[trial, :, epoch] = rewards
             all_metrics[trial, :, epoch] = [m.value for m in metrics]
+
             if plot:
                 # Add agents progress
-                if n_agents > 1:
-                    p = ax.plot(epoch, rewards.sum(), '+k')
-                    tmp_points.extend(p)
-                for reward, col in zip(rewards, colors):
-                    p = ax.plot(epoch, reward, '.', c=col)
-                    tmp_points.extend(p)
-
-                # Add metrics
-                for metric, col in zip(metrics, colors_metric):
-                    p = ax_metric.plot(epoch, metric.value, '.', c=col)
-                    tmp_points.extend(p)
-
-                # Update plot
+                train_plotter.update(epoch, rewards)
                 plt.pause(0.01)
 
             pbar.update(1)
 
         if plot:
-            for p in tmp_points:
-                p.remove()
-
-            # Sort rewards
-            agent_names = np.array([repr(agent) for agent in agents], dtype=object)
-            for agent_type in np.unique(agent_names):
-                i_agents = np.flatnonzero(agent_names == agent_type)
-                i_sort = i_agents[np.argsort(all_rewards[trial, i_agents, -1])[::-1]]
-                all_rewards[trial, i_agents, :] = all_rewards[trial, i_sort, :]
-
-            alpha = 1 / n_trials
-            kws = dict(alpha=alpha, ms=4)
-            if n_agents > 1:
-                ax.plot(epochs, all_rewards[trial, :, :].sum(axis=0), 'P-k', **kws)
-            markers = get_markers()
-            for i_agent in range(n_agents):
-                m = next(markers)
-                ax.plot(epochs, all_rewards[trial, i_agent, :], f'{m}-', c=colors[i_agent], **kws)
-
-            # Add metrics
-            markers_metric = get_markers_metric
-            for i_metric in range(n_metrics):
-                col = colors_metric[i_metric]
-                m  = next(markers_metric)
-                ax_metric.plot(epochs, all_metrics[trial, i_metric, :], f'{m}-', c=col, alpha=alpha)
-
+            train_plotter.finalize_trial(epochs, all_rewards[trial, :, :], alpha=(1 / n_trials))
+            q_value_plotter.update(trial)
             plt.pause(0.01)
 
-    if plot and (n_trials > 1):
-        # Sort rewards
-        for trial in range(n_trials):
-            rewards = all_rewards[trial, :, :]
-            agent_names = np.array([repr(agent) for agent in agents], dtype=object)
-            for agent_type in np.unique(agent_names):
-                i_agents = np.flatnonzero(agent_names == agent_type)
-                i_sort = i_agents[np.argsort(rewards[i_agents, -1])[::-1]]
-                rewards[i_agents, :] = rewards[i_sort, :]
-            all_rewards[trial, :, :] = rewards
-
-        def mean_ci(values):
-            mean = values.mean(axis=0)
-            ci = stats.norm.interval(0.95, loc=values.mean(axis=0), scale=(values).std(axis=0).mean(axis=0))
-            ci = np.stack(ci, axis=1)
-            return mean, ci
-
-        if n_agents > 1:
-            r_sum_mean, r_sum_ci = mean_ci(all_rewards.sum(axis=1, keepdims=True))
-        rewards_mean, rewards_ci = mean_ci(all_rewards)
-        metrics_mean, metrics_ci = mean_ci(all_metrics)
-
-        def plot_summary(ax, x, y, y_ci, col, markers, n, **kwargs):
-            for i in range(n):
-                m = next(markers)
-                ax.plot(x, y[i, :], c=col[i], marker=m, markeredgecolor="k", **kwargs)
-                ax.fill_between(x, y_ci[i, 0, :], y_ci[i, 1, :], fc=col[i], ec=col[i], alpha=0.5, **kwargs)
-
-        kws = dict()
-        if n_agents > 1:
-            plot_summary(ax, epochs, r_sum_mean, r_sum_ci, ['k'], iter(["P"]), 1, **kws)
-        plot_summary(ax, epochs, rewards_mean, rewards_ci, colors, get_markers(), n_agents, **kws)
-        plot_summary(ax_metric, epochs, metrics_mean, metrics_ci, colors_metric, get_markers_metric(), n_metrics, **kws)
-
+    if plot:
+        train_plotter.summarize(epochs, all_rewards, all_metrics)
+        q_value_plotter.plot()
         plt.pause(0.01)
 
     pbar.close()

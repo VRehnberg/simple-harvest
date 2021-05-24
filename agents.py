@@ -139,14 +139,18 @@ class QLearner(AppleAgent):
         self.epsilon_change = epsilon_change
         self.episode = 0
 
-    def observe(self, observation):
-        """Update state from observation."""
+    def observe_(self, observation):
         observation = np.atleast_1d(observation)
         state = np.ravel_multi_index(
             observation,
             self.observation_dims,
         )
-        self.state = state
+        return state
+
+
+    def observe(self, observation):
+        """Update state from observation."""
+        self.state = self.observe_(observation)
 
     def act(self):
         if np.random.rand() > self.epsilon:
