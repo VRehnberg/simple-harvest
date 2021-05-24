@@ -1,4 +1,5 @@
 import time
+import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker, lines, offsetbox
@@ -48,6 +49,14 @@ def visualize_growth():
     return fig
 
 
+def get_markers():
+    return itertools.cycle(["o", "s", "X", "D", "v", "^", "<", ">"])
+
+
+def get_markers_metric():
+    return itertools.cycle(["o", "s", "X", "D", "v", "^", "<", ">"])
+
+
 def train_agents(
         env,
         agents,
@@ -62,6 +71,7 @@ def train_agents(
     n_agents = env.n_agents
     n_metrics = len(metrics)
 
+    # Initialize axes and legends
     if plot:
         # Axis
         if metrics:
@@ -72,9 +82,7 @@ def train_agents(
             ax_metric.set_ylabel("Metric value")
         else:
             fig, ax = plt.subplots()
-        ax.set_xlim([0, n_epochs - 1])
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Training reward")
+            ax_metric = None
 
         # Theoretical maximum and legend
         cap = env.max_apples
@@ -82,26 +90,34 @@ def train_agents(
         max_efficiency = t_max * rate * cap / 4
         ax.axhline(max_efficiency, ls="--", c="k", label="Max")
         colors = []
+        markers = get_markers()
         for agent in agents:
-            p = ax.plot(-10, cap / 2, ".-", label=repr(agent))
+            m = next(markers)
+            p = ax.plot(-10, max_efficiency / n_agents, f"{m}-", label=repr(agent))
             colors.append(p[0].get_color())
         if n_agents > 1:
-            ax.plot(-10, cap / 2, "+-k", label=f"Sum")
+            ax.plot(-10, max_efficiency, "P-k", label=f"Sum")
         ax.legend(
             title="Rewards",
             loc='lower center',
             bbox_to_anchor=(0.5, 0.97),
-            ncol=3,
+            ncol=3 if n_agents > 2 else 2,
             fancybox=True,
             shadow=True,
         )
+        ax.set_xlim([0, n_epochs - 1])
+        ax.set_ylim([0, 1.05 * max_efficiency])
         ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
         ax.autoscale(enable=False)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Training reward")
 
         # Metrics
         colors_metric = []
+        markers_metric = get_markers_metric()
         for metric in metrics:
-            p = ax_metric.plot(-10, 0.5, '.-', label=repr(metric))
+            m = next(markers_metric)
+            p = ax_metric.plot(-10, 0.5, f'{m}-', label=repr(metric))
             colors_metric.append(p[0].get_color())
 
         if ax_metric:
@@ -117,7 +133,7 @@ def train_agents(
 
         fig.tight_layout()
 
-    # Training loop
+    # Training loops
     epochs = range(n_epochs)
     all_rewards = np.zeros([n_trials, n_agents, n_epochs])
     all_metrics = np.zeros([n_trials, n_metrics, n_epochs])
@@ -193,14 +209,20 @@ def train_agents(
                 all_rewards[trial, i_agents, :] = all_rewards[trial, i_sort, :]
 
             alpha = 1 / n_trials
+            kws = dict(alpha=alpha, ms=4)
             if n_agents > 1:
-                ax.plot(epochs, all_rewards[trial, :, :].sum(axis=0), '+-k', alpha=alpha)
+                ax.plot(epochs, all_rewards[trial, :, :].sum(axis=0), 'P-k', **kws)
+            markers = get_markers()
             for i_agent in range(n_agents):
-                ax.plot(epochs, all_rewards[trial, i_agent, :], '.-', c=colors[i_agent], alpha=alpha)
+                m = next(markers)
+                ax.plot(epochs, all_rewards[trial, i_agent, :], f'{m}-', c=colors[i_agent], **kws)
 
             # Add metrics
+            markers_metric = get_markers_metric
             for i_metric in range(n_metrics):
-                ax_metric.plot(epochs, all_metrics[trial, i_metric, :], '.-', c=colors_metric[i_metric], alpha=alpha)
+                col = colors_metric[i_metric]
+                m  = next(markers_metric)
+                ax_metric.plot(epochs, all_metrics[trial, i_metric, :], f'{m}-', c=col, alpha=alpha)
 
             plt.pause(0.01)
 
@@ -218,29 +240,32 @@ def train_agents(
         def mean_ci(values):
             mean = values.mean(axis=0)
             ci = stats.norm.interval(0.95, loc=values.mean(axis=0), scale=(values).std(axis=0).mean(axis=0))
-            ci = (np.stack(ci, axis=1) - mean[:, np.newaxis, :]).abs()
+            ci = np.stack(ci, axis=1)
             return mean, ci
+
+        if n_agents > 1:
+            r_sum_mean, r_sum_ci = mean_ci(all_rewards.sum(axis=1, keepdims=True))
         rewards_mean, rewards_ci = mean_ci(all_rewards)
         metrics_mean, metrics_ci = mean_ci(all_metrics)
 
-        def plot_summary(ax, x, y, yerr, col, n, **kwargs):
+        def plot_summary(ax, x, y, y_ci, col, markers, n, **kwargs):
             for i in range(n):
-                ax.errorbar(x, y[i, :], yerr[i, :], fmt="-", c=col[i], capsize=2)
+                m = next(markers)
+                ax.plot(x, y[i, :], c=col[i], marker=m, markeredgecolor="k", **kwargs)
+                ax.fill_between(x, y_ci[i, 0, :], y_ci[i, 1, :], fc=col[i], ec=col[i], alpha=0.5, **kwargs)
 
+        kws = dict()
         if n_agents > 1:
-            r_sum_mean, r_sum_ci = mean_ci(all_rewards.sum(axis=1))
-            r_sum_ci = r_sum_ci.T
-            ax.errorbar(epochs, r_sum_mean, r_sum_ci, fmt='-k', capsize=2)
-
-        plot_summary(ax, epochs, rewards_mean, rewards_ci, colors, n_agents)
-        plot_summary(ax_metric, epochs, metrics_mean, metrics_ci, colors_metric, n_metrics)
+            plot_summary(ax, epochs, r_sum_mean, r_sum_ci, ['k'], iter(["P"]), 1, **kws)
+        plot_summary(ax, epochs, rewards_mean, rewards_ci, colors, get_markers(), n_agents, **kws)
+        plot_summary(ax_metric, epochs, metrics_mean, metrics_ci, colors_metric, get_markers_metric(), n_metrics, **kws)
 
         plt.pause(0.01)
 
     pbar.close()
 
 
-def run_example(env, agents, t_max=100, render=True):
+def run_example(env, agents, t_max=1000, render=True):
     """Run a single game with a maximal length."""
 
     n_agents = env.n_agents
@@ -251,7 +276,7 @@ def run_example(env, agents, t_max=100, render=True):
         agent.reset(obs)
         agent.eval()
 
-    total_rewards = np.zeros(n_agents)
+    rewards = np.zeros([n_agents, t_max])
 
     for t in range(t_max):
 
@@ -264,17 +289,48 @@ def run_example(env, agents, t_max=100, render=True):
 
         for i_agent, agent in enumerate(agents):
             action = actions[i_agent]
-            obs = env.get_obs(agent=i_agent)
-            reward = env.previous_rewards[i_agent]
+            obs = info[f"obs{i_agent}"]
+            reward = info[f"reward{i_agent}"]
             agent.update(action, obs, reward, done)
 
-        total_rewards += env.previous_rewards
+            rewards[i_agent, t] = reward
+
         if done:
             break
 
-    avg_rewards = total_rewards / t
+    avg_rewards = rewards.mean(1)
     for agent, avg_reward in zip(agents, avg_rewards):
         print(f"Reward for {agent}: {avg_reward:.4g}")
+
+    if render:
+        fig, ax = plt.subplots()
+        t = np.arange(t_max)
+
+        # Theoretical maximum and legend
+        cap = env.max_apples
+        rate = env.growth_rate
+        max_efficiency = rate * cap / 4
+        ax.axhline(max_efficiency, ls="--", c="k", label="Max")
+        markers = get_markers()
+        for i_agent, agent in enumerate(agents):
+            m = next(markers)
+            ax.plot(t, rewards[i_agent, :], f"{m}", label=repr(agent))
+        if n_agents > 1:
+            ax.plot(t, rewards.sum(0), "Pk", label=f"Sum")
+        ax.legend(
+            title="Rewards",
+            loc='lower center',
+            bbox_to_anchor=(0.5, 0.97),
+            ncol=3 if n_agents > 2 else 2,
+            fancybox=True,
+            shadow=True,
+        )
+        ax.set_xlim([0, t_max])
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+        ax.set_xlabel("Time step")
+        ax.set_ylabel("Reward")
+
+        fig.tight_layout()
 
 
 def main():
@@ -290,14 +346,14 @@ def main():
         # Agent, n, args, kwargs
         (AppleAgent, 0, {}),  # random agents
         (Punisher, 0, {}),
-        (QLearner, 1, kwargs),
+        (QLearner, 2, kwargs),
     ]
     n_agents = sum(n for _, n, _ in agent_parameters)
     growth_rate = 0.15
     max_apples = 20 * n_agents
-    n_trials = 10
-    n_epochs = 50
-    t_max = 1000
+    n_trials = 3#10
+    n_epochs = 20#50
+    t_max = 100#1000
     env = SimpleHarvest(
         n_agents=n_agents,
         growth_rate=growth_rate,
@@ -309,17 +365,17 @@ def main():
         for _ in range(n)
     ]
     metrics = (
-        GiniRewards(n_agents),
-        GiniApples(n_agents),
-        Efficiency(growth_rate, max_apples, t_max),
-        Aggressiveness(n_agents),
-        GiniTagged(n_agents),
-        SelfHarm(n_agents),
+        #GiniRewards(n_agents),
+        #GiniApples(n_agents),
+        #Efficiency(growth_rate, max_apples, t_max),
+        #Aggressiveness(n_agents),
+        #GiniTagged(n_agents),
+        #SelfHarm(n_agents),
     )
     if n_agents == 1:
         metrics = [m for m in metrics if not isinstance(m, GiniMetric)]
     train_agents(env, agents, metrics=metrics, n_trials=n_trials, n_epochs=n_epochs, t_max=t_max)
-    run_example(env, agents, render=False)
+    run_example(env, agents, t_max=t_max, render=False)
 
     # Visualize apple population logistic growth
     fig = visualize_growth()
