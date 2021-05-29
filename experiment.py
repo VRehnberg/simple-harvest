@@ -1,3 +1,4 @@
+import os
 import time
 import itertools
 import numpy as np
@@ -45,6 +46,8 @@ def visualize_growth():
     ax.set_xlabel(r"Relative population $P/K$")
     ax.set_ylabel(r"Relative population growth $\Delta P/K$")
     ax.legend()
+
+    fig.tight_layout()
 
     return fig
 
@@ -148,11 +151,10 @@ class TrainPlotter:
             p = self.ax_metric.plot(epoch, metric.value, '.', c=col)
             self.tmp_points.extend(p)
 
-    def finalize_trial(self, epochs, rewards, alpha=1.0):
+    def finalize_trial(self, epochs, rewards, metrics, alpha=1.0):
         for p in self.tmp_points:
             p.remove()
         self.tmp_points = []
-        #rewards = all_rewards[trial, i_agents, -1]
 
         # Sort rewards
         agent_names = np.array([repr(agent) for agent in self.agents], dtype=object)
@@ -170,11 +172,11 @@ class TrainPlotter:
             self.ax.plot(epochs, rewards[i_agent, :], f'{m}-', c=self.colors_reward[i_agent], **kws)
 
         # Add metrics
-        markers_metric = get_markers_metric
+        markers_metric = get_markers_metric()
         for i_metric in range(self.n_metrics):
             col = self.colors_metric[i_metric]
             m = next(markers_metric)
-            self.ax_metric.plot(epochs, self.metrics[i_metric, :], f'{m}-', c=col, alpha=alpha)
+            self.ax_metric.plot(epochs, metrics[i_metric, :], f'{m}-', c=col, alpha=alpha)
 
     def summarize(self, epochs, all_rewards, all_metrics):
         # Sort rewards
@@ -190,7 +192,7 @@ class TrainPlotter:
 
         def mean_ci(values):
             mean = values.mean(axis=0)
-            ci = stats.norm.interval(0.95, loc=values.mean(axis=0), scale=(values).std(axis=0).mean(axis=0))
+            ci = stats.norm.interval(0.68, loc=values.mean(axis=0), scale=values.std(axis=0).mean(axis=0))
             ci = np.stack(ci, axis=1)
             return mean, ci
 
@@ -237,7 +239,7 @@ class QValuePlotter:
     def __init__(self, env, n_trials, agents):
         n_agents = len(agents)
         max_apples = env.max_apples
-        n_combos = 2 ** n_agents
+        n_combos = 2 ** (n_agents - 1)
         n_actions = env.action_space.n
         q_learners = [agent for agent in agents if isinstance(agent, QLearner)]
         n_q_learners = len(q_learners)
@@ -261,15 +263,14 @@ class QValuePlotter:
         for i_q_learner, agent in enumerate(self.q_learners):
             q_values = agent.q_values.copy()
             for n_apples in range(self.grid.shape[1]):
-                for i_combo, actions in enumerate(itertools.product([0, 1], repeat=self.n_agents)):
-                    mask = np.array([agent2 is not agent for agent2 in self.agents])
-                    obs = np.hstack([n_apples, *np.array(actions)[mask]])
+                for i_combo, other_actions in enumerate(itertools.product([0, 1], repeat=(self.n_agents - 1))):
+                    obs = np.hstack([n_apples, *np.array(other_actions)])
                     state = agent.observe_(obs)
                     self.grid[trial, n_apples, i_combo, :, i_q_learner] = q_values[state, :]
 
     def plot(self):
         with sns.axes_style("white"):
-            fig, axs = plt.subplots(self.n_trials, 1, figsize=(12, self.n_trials * 1.2))
+            fig, axs = plt.subplots(self.n_trials, 1, figsize=(12, self.n_trials * 1.5), constrained_layout=True)
 
         if self.grid.min() < 0.0:
             norm = colors.TwoSlopeNorm(vmin=self.grid.min(), vcenter=0.0, vmax=self.grid.max())
@@ -277,34 +278,36 @@ class QValuePlotter:
             norm = colors.TwoSlopeNorm(vmin=0.0 - 1e-5, vcenter=0.0, vmax=self.grid.max())
         cmap = sns.color_palette("vlag", as_cmap=True)
         grid_3d = self.grid_3d
-        xticks = (self.n_actions * np.arange(self.grid.shape[1] + 1)) - 0.5
-        yticks = (len(self.q_learners) * np.arange(self.grid.shape[3] + 1)) - 0.5
+        yticks, yticklabels = zip(*[
+            (i + 0.5, f'({", ".join(combo)})')
+            for i, combo in enumerate(itertools.product(["0", "1"], repeat=2))
+        ])
         for trial, ax in enumerate(axs):
             # Plot
             grid_2d = grid_3d[trial, :, :]
-            ax.pcolor(grid_2d.T, ec="w", lw=0.5, cmap=cmap, norm=norm)
+            ax.pcolormesh(grid_2d.T, ec="w", lw=0.5, cmap=cmap, norm=norm)
 
             # Modify ticks
-            for sub_axis, ticks in zip([ax.xaxis, ax.yaxis], [xticks, yticks]):
-                sub_axis.set_major_locator(ticker.FixedLocator(ticks))
-                sub_axis.set_major_formatter(ticker.NullFormatter())
-                centered_ticks = (ticks[1:] + ticks[:-1]) / 2
-                sub_axis.set_minor_locator(ticker.FixedLocator(centered_ticks))
-                sub_axis.set_minor_formatter(ticker.FixedFormatter(centered_ticks))
-            ax.yaxis.set_minor_formatter(ticker.FixedFormatter([
-                f'({", ".join(combo)})' for combo in itertools.product(["0", "1"], repeat=2)
-            ]))
-            ax.tick_params(which="major", direction="out", length=2, color="k")
+            ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+            xticklabels = np.round(ax.get_xticks()).astype(int)
+            xticks = xticklabels + 0.5
+            ax.xaxis.set_major_locator(ticker.FixedLocator(xticks))
+            ax.set_xticklabels(xticklabels)
+
+            ax.set_yticks(yticks)
+            ax.set_yticklabels(yticklabels)
 
             # Axis labels
-            ax.set_ylabel("Previous actions")
-        ax.set_xlabel("Available apples")
+            ax.set_ylabel(" \n ")
+        label_ax = fig.add_subplot(111, frameon=False)
+        label_ax.grid(False)
+        label_ax.tick_params(labelcolor='none', which='both', top=False, bottom=False, left=False, right=False)
+        label_ax.set_ylabel("Agent\nObserved actions")
+        label_ax.set_xlabel("Available apples")
 
         # Colorbar
         cbar = fig.colorbar(cm.ScalarMappable(cmap=cmap, norm=norm), ax=axs, location="right", fraction=0.07)
         cbar.set_label("Q-value")
-
-        fig.tight_layout()
 
 
 def train_agents(
@@ -380,16 +383,24 @@ def train_agents(
             pbar.update(1)
 
         if plot:
-            train_plotter.finalize_trial(epochs, all_rewards[trial, :, :], alpha=(1 / n_trials))
+            train_plotter.finalize_trial(
+                epochs,
+                all_rewards[trial, :, :],
+                all_metrics[trial, :, :],
+                alpha=(1 / n_trials),
+            )
             q_value_plotter.update(trial)
             plt.pause(0.01)
 
     if plot:
         train_plotter.summarize(epochs, all_rewards, all_metrics)
         q_value_plotter.plot()
-        plt.pause(0.01)
+        plt.pause(0.1)
 
     pbar.close()
+
+    figs = [train_plotter.fig, q_value_plotter.fig] if plot else []
+    return figs
 
 
 def run_example(env, agents, t_max=1000, render=True):
@@ -460,55 +471,7 @@ def run_example(env, agents, t_max=1000, render=True):
         fig.tight_layout()
 
 
-def main():
-    # Example run
-    kwargs = dict(
-        learning_rate=1.0,
-        learning_rate_change=0.01,
-        discount=0.98,
-        epsilon=0.2,
-        epsilon_change=0.05,
-    )
-    agent_parameters = [
-        # Agent, n, args, kwargs
-        (AppleAgent, 0, {}),  # random agents
-        (Punisher, 0, {}),
-        (QLearner, 2, kwargs),
-    ]
-    n_agents = sum(n for _, n, _ in agent_parameters)
-    growth_rate = 0.15
-    max_apples = 20 * n_agents
-    n_trials = 3#10
-    n_epochs = 20#50
-    t_max = 100#1000
-    env = SimpleHarvest(
-        n_agents=n_agents,
-        growth_rate=growth_rate,
-        max_apples=max_apples,
-    )
-    agents = [
-        Agent(max_apples, n_agents, **kwargs)
-        for Agent, n, kwargs in agent_parameters
-        for _ in range(n)
-    ]
-    metrics = (
-        #GiniRewards(n_agents),
-        #GiniApples(n_agents),
-        #Efficiency(growth_rate, max_apples, t_max),
-        #Aggressiveness(n_agents),
-        #GiniTagged(n_agents),
-        #SelfHarm(n_agents),
-    )
-    if n_agents == 1:
-        metrics = [m for m in metrics if not isinstance(m, GiniMetric)]
-    train_agents(env, agents, metrics=metrics, n_trials=n_trials, n_epochs=n_epochs, t_max=t_max)
-    run_example(env, agents, t_max=t_max, render=False)
-
-    # Visualize apple population logistic growth
-    fig = visualize_growth()
-    fig.tight_layout()
-    fig.savefig("growth_rate.pdf", bbox_inches="tight")
-
+def visualize_policy():
     # Visualize policy
     max_apples = 20
     growth_rates = np.linspace(0, 1, 500) / (max_apples / 4)
@@ -573,7 +536,103 @@ def main():
 
     # Save figure
     fig.tight_layout()
+    return fig
+
+
+def experiment_handler(
+    learning_rate=1.0,
+    learning_rate_change=0.01,
+    discount=0.98,
+    epsilon=0.2,
+    epsilon_change=0.05,
+    growth_rate=0.15,
+    n_trials = 10,
+    n_epochs = 50,
+    t_max = 1000,
+    Agents=None,
+):
+    # Example run
+    if Agents is None:
+        Agents = {
+            AppleAgent: 0,
+            Punisher: 0,
+            QLearner: 2,
+        }
+
+    qlearner_kwargs = dict(
+        learning_rate=learning_rate,
+        learning_rate_change=learning_rate_change,
+        discount=discount,
+        epsilon=epsilon,
+        epsilon_change=epsilon_change,
+    )
+    n_agents = sum(Agents.values())
+    max_apples = 20 * n_agents
+    env = SimpleHarvest(
+        n_agents=n_agents,
+        growth_rate=growth_rate,
+        max_apples=max_apples,
+    )
+    agents = [
+        Agent(max_apples, n_agents, **(qlearner_kwargs if isinstance(Agent, QLearner) else {}))
+        for Agent, n in Agents.items()
+        for _ in range(n)
+    ]
+    metrics = (
+        GiniRewards(n_agents),
+        GiniApples(n_agents),
+        Efficiency(growth_rate, max_apples, t_max),
+        Aggressiveness(n_agents),
+        GiniTagged(n_agents),
+        SelfHarm(n_agents),
+    )
+    if n_agents == 1:
+        # Gini doesn't make sense if you have a single agent
+        metrics = [m for m in metrics if not isinstance(m, GiniMetric)]
+    training_figs = train_agents(env, agents, metrics=metrics, n_trials=n_trials, n_epochs=n_epochs, t_max=t_max)
+    run_example(env, agents, t_max=t_max, render=False)
+
+    return training_figs
+
+
+def parameter_search(loop_kwargs, subdir=""):
+    parameter_names = loop_kwargs.keys()
+    parameter_lists = loop_kwargs.values()
+
+    for parameters in itertools.product(*parameter_lists):
+        kws = {k : v for k, v in zip(parameter_names, parameters)}
+        file_id = "_".join(f"{k}-{v}" for k, v in kws.items())
+
+        train_filename = os.path.join(subdir, "train_" + file_id + ".pdf")
+        qval_filename = os.path.join(subdir, "qvalues_" + file_id + ".pdf")
+        if os.path.isfile(train_filename) or os.path.isfile(qval_filename):
+            continue
+
+        train_fig, qval_fig = experiment_handler(**kws)
+
+        train_fig.savefig(train_filename, bbox_inches="tight")
+        qval_fig.savefig(train_filename, bbox_inches="tight")
+
+
+def main():
+
+    # Run experiment
+    parameter_search(dict(
+        learning_rate_change=[0.001, 0.01, 0.1],
+        discount=[0.96, 0.98, 0.99],
+        epsilon=[0.1, 0.2, 0.4],
+        epsilon_change=[0.02, 0.05],
+        growth_rate=[0.05, 0.15],
+    ))
+
+    # Visualize apple population logistic growth
+    fig = visualize_growth()
+    fig.savefig("growth_rate.pdf", bbox_inches="tight")
+
+    # Visualize policy for single agent
+    fig = visualize_policy()
     fig.savefig("policy_grid.pdf", bbox_inches="tight")
+
 
     plt.show()
 
