@@ -1,5 +1,6 @@
 import os
 import time
+import random
 import itertools
 import numpy as np
 import matplotlib.pyplot as plt
@@ -597,11 +598,13 @@ def experiment_handler(
 
 def parameter_search(loop_kwargs, subdir="param_search"):
     if not os.path.isdir(subdir):
-        os.path.mkdir(subdir)
+        os.mkdir(subdir)
     parameter_names = loop_kwargs.keys()
     parameter_lists = loop_kwargs.values()
 
-    for parameters in itertools.product(*parameter_lists):
+    parameter_tuples = list(itertools.product(*parameter_lists))
+    random.shuffle(parameter_tuples)
+    for parameters in parameter_tuples:
         kws = {k : v for k, v in zip(parameter_names, parameters)}
         file_id = "_".join(f"{k}-{v}" for k, v in kws.items())
 
@@ -625,6 +628,7 @@ def main():
         epsilon=[0.1, 0.2, 0.4],
         epsilon_change=[0.02, 0.05],
         growth_rate=[0.05, 0.15],
+        Agents=[{QLearner: 2}, {QLearner: 3}],
     ))
 
     # Visualize apple population logistic growth
