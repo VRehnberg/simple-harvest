@@ -547,9 +547,9 @@ def experiment_handler(
     epsilon=0.2,
     epsilon_change=0.05,
     growth_rate=0.15,
-    n_trials = 10,
-    n_epochs = 50,
-    t_max = 1000,
+    n_trials=10,
+    n_epochs=100,
+    t_max=1000,
     Agents=None,
 ):
     # Example run
@@ -596,7 +596,7 @@ def experiment_handler(
     return training_figs
 
 
-def parameter_search(loop_kwargs, subdir="param_search"):
+def parameter_search(loop_kwargs, subdir="parameter_search"):
     if not os.path.isdir(subdir):
         os.mkdir(subdir)
     parameter_names = loop_kwargs.keys()
@@ -605,7 +605,7 @@ def parameter_search(loop_kwargs, subdir="param_search"):
     parameter_tuples = list(itertools.product(*parameter_lists))
     random.shuffle(parameter_tuples)
     for parameters in parameter_tuples:
-        kws = {k : v for k, v in zip(parameter_names, parameters)}
+        kws = {k: v for k, v in zip(parameter_names, parameters)}
         file_id = "_".join(f"{k}-{v}" for k, v in kws.items())
 
         train_filename = os.path.join(subdir, "train_" + file_id + ".pdf")
@@ -620,7 +620,6 @@ def parameter_search(loop_kwargs, subdir="param_search"):
 
 
 def main():
-
     # Run experiment
     parameter_search(dict(
         learning_rate_change=[0.001, 0.01, 0.1],
@@ -638,7 +637,6 @@ def main():
     # Visualize policy for single agent
     fig = visualize_policy()
     fig.savefig("policy_grid.pdf", bbox_inches="tight")
-
 
     plt.show()
 
