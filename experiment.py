@@ -595,7 +595,9 @@ def experiment_handler(
     return training_figs
 
 
-def parameter_search(loop_kwargs, subdir=""):
+def parameter_search(loop_kwargs, subdir="param_search"):
+    if not os.path.isdir(subdir):
+        os.path.mkdir(subdir)
     parameter_names = loop_kwargs.keys()
     parameter_lists = loop_kwargs.values()
 
