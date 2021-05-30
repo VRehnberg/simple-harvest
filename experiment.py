@@ -643,7 +643,7 @@ def parameter_search(loop_kwargs, grid=False, subdir=None):
     random.shuffle(parameter_tuples)
     for parameters in parameter_tuples:
         kws = {k: v for k, v in zip(parameter_names, parameters) if v is not None}
-        file_id = "_".join(f"{k}-{v if k is not 'Agents' else Agents_id(v)}" for k, v in kws.items())
+        file_id = "_".join(f"{k}-{v if k != 'Agents' else Agents_id(v)}" for k, v in kws.items())
 
         train_filename = os.path.join(subdir, "train_" + file_id + ".pdf")
         qval_filename = os.path.join(subdir, "qvalues_" + file_id + ".pdf")
