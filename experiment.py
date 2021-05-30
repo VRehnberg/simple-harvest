@@ -311,6 +311,7 @@ class QValuePlotter:
 
             # Axis labels
             ax.set_ylabel(" \n ")
+        ax.set_xlabel(" ")
         label_ax = fig.add_subplot(111, frameon=False)
         label_ax.grid(False)
         label_ax.tick_params(labelcolor='none', which='both', top=False, bottom=False, left=False, right=False)
