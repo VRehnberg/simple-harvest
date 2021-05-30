@@ -620,6 +620,9 @@ def parameter_search(loop_kwargs, subdir="parameter_search"):
         train_fig.savefig(train_filename, bbox_inches="tight")
         qval_fig.savefig(train_filename, bbox_inches="tight")
 
+        plt.close(train_fig)
+        plt.close(qval_fig)
+
 
 def main():
     # Run experiment
