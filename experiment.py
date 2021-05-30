@@ -253,11 +253,15 @@ class QValuePlotter:
         self.q_learners = q_learners
         self.grid = grid
 
-    @property
-    def grid_3d(self):
-        shape = self.grid.shape
+    def get_grid3d(self, normalize=False):
+        grid = self.grid.copy()
+        if normalize:
+            grid -= grid.min((1, 2, 3), keepdims=True)
+            grid /= grid.max((1, 2, 3), keepdims=True)
+
+        shape = grid.shape
         new_shape = (shape[0], shape[1] * shape[3], shape[2] * shape[4])
-        grid_3d = np.moveaxis(self.grid, [1, 2, 3, 4], [1, 3, 2, 4]).reshape(*new_shape)
+        grid_3d = np.moveaxis(grid, [1, 2, 3, 4], [1, 3, 2, 4]).reshape(*new_shape)
         return grid_3d
 
     def update(self, trial):
@@ -269,20 +273,27 @@ class QValuePlotter:
                     state = agent.observe_(obs)
                     self.grid[trial, n_apples, i_combo, :, i_q_learner] = q_values[state, :]
 
-    def plot(self):
+    def plot(self, normalize=True):
         with sns.axes_style("white"):
             fig, axs = plt.subplots(self.n_trials, 1, figsize=(12, self.n_trials * 1.5), constrained_layout=True)
 
-        if self.grid.min() < 0.0:
+        # Define colormaps
+        if normalize:
+            norm = colors.Normalize(vmin=0.0, vmax=1.0)
+            cmap = sns.color_palette("rocket_r", as_cmap=True)
+        elif self.grid.min() < 0.0 and not np.isclose(self.grid.min() / self.grid.max(), 0):
             norm = colors.TwoSlopeNorm(vmin=self.grid.min(), vcenter=0.0, vmax=self.grid.max())
+            cmap = sns.color_palette("vlag", as_cmap=True)
         else:
-            norm = colors.TwoSlopeNorm(vmin=0.0 - 1e-5, vcenter=0.0, vmax=self.grid.max())
-        cmap = sns.color_palette("vlag", as_cmap=True)
-        grid_3d = self.grid_3d
+            norm = colors.Normalize(vmin=0.0, vmax=self.grid.max())
+            cmap = sns.color_palette("rocket_r", as_cmap=True)
+
+        # Yticks and yticklabels
         yticks, yticklabels = zip(*[
             (i + 0.5, f'({", ".join(combo)})')
-            for i, combo in enumerate(itertools.product(["0", "1"], repeat=2))
+            for i, combo in enumerate(itertools.product(["0", "1"], repeat=self.n_agents))
         ])
+        grid_3d = self.get_grid_3d(normalize=normalize)
         for trial, ax in enumerate(axs):
             # Plot
             grid_2d = grid_3d[trial, :, :]
@@ -303,7 +314,7 @@ class QValuePlotter:
         label_ax = fig.add_subplot(111, frameon=False)
         label_ax.grid(False)
         label_ax.tick_params(labelcolor='none', which='both', top=False, bottom=False, left=False, right=False)
-        label_ax.set_ylabel("Agent\nObserved actions")
+        label_ax.set_ylabel("Agent\nActions")
         label_ax.set_xlabel("Available apples")
 
         # Colorbar
@@ -618,7 +629,7 @@ def parameter_search(loop_kwargs, subdir="parameter_search"):
         train_fig, qval_fig = experiment_handler(**kws)
 
         train_fig.savefig(train_filename, bbox_inches="tight")
-        qval_fig.savefig(train_filename, bbox_inches="tight")
+        qval_fig.savefig(qval_filename, bbox_inches="tight")
 
         plt.close(train_fig)
         plt.close(qval_fig)
