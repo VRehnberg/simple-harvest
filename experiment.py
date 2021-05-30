@@ -293,7 +293,7 @@ class QValuePlotter:
             (i + 0.5, f'({", ".join(combo)})')
             for i, combo in enumerate(itertools.product(["0", "1"], repeat=self.n_agents))
         ])
-        grid_3d = self.get_grid_3d(normalize=normalize)
+        grid_3d = self.get_grid3d(normalize=normalize)
         for trial, ax in enumerate(axs):
             # Plot
             grid_2d = grid_3d[trial, :, :]
