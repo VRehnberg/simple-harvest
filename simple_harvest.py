@@ -171,7 +171,7 @@ class SimpleHarvest(Env):
 
         # If tags
         tags = (actions > 1)
-        rewards[tags] += self.tag_cost
+        rewards[tags] -= self.tag_cost
 
         # If tagged this round
         shifted_actions = self.shift_actions(actions.copy())
