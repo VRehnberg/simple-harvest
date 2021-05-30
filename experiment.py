@@ -615,11 +615,17 @@ def parameter_search(loop_kwargs, subdir="parameter_grid"):
     parameter_names = loop_kwargs.keys()
     parameter_lists = loop_kwargs.values()
 
+    def Agents_id(Agents):
+        return "".join([
+            id += Agent.__name__ + "n"
+            for Agent, n in Agents.items()
+        ])
+
     parameter_tuples = list(itertools.product(*parameter_lists))
     random.shuffle(parameter_tuples)
     for parameters in parameter_tuples:
         kws = {k: v for k, v in zip(parameter_names, parameters)}
-        file_id = "_".join(f"{k}-{v}" for k, v in kws.items())
+        file_id = "_".join(f"{k}-{v if k is not 'Agents' else Agents_id(v)}" for k, v in kws.items())
 
         train_filename = os.path.join(subdir, "train_" + file_id + ".pdf")
         qval_filename = os.path.join(subdir, "qvalues_" + file_id + ".pdf")
