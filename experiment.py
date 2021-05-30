@@ -9,7 +9,7 @@ from tqdm import tqdm
 from scipy import stats
 
 from simple_harvest import SimpleHarvest
-from agents import AppleAgent, Punisher, QLearner
+from agents import AppleAgent, Punisher, QLearner, AlwaysPick
 from metrics import GiniRewards, GiniApples, Efficiency, Aggressiveness, GiniTagged, SelfHarm, GiniMetric
 from utils import logistic_growth, policy_iteration
 
@@ -554,16 +554,17 @@ def visualize_policy():
 
 
 def experiment_handler(
-    learning_rate=1.0,
-    learning_rate_change=0.01,
-    discount=0.98,
-    epsilon=0.2,
-    epsilon_change=0.05,
-    growth_rate=0.15,
-    n_trials=10,
-    n_epochs=100,
-    t_max=1000,
-    Agents=None,
+        learning_rate=1.0,
+        learning_rate_change=0.01,
+        discount=0.98,
+        epsilon=0.2,
+        epsilon_change=0.05,
+        growth_rate=0.15,
+        n_trials=10,
+        n_epochs=100,
+        t_max=1000,
+        Agents=None,
+        tag_cost=0.0,
 ):
     # Example run
     if Agents is None:
@@ -586,6 +587,7 @@ def experiment_handler(
         n_agents=n_agents,
         growth_rate=growth_rate,
         max_apples=max_apples,
+        tag_cost=tag_cost,
     )
     agents = [
         Agent(max_apples, n_agents, **(qlearner_kwargs if isinstance(Agent, QLearner) else {}))
@@ -609,22 +611,37 @@ def experiment_handler(
     return training_figs
 
 
-def parameter_search(loop_kwargs, subdir="parameter_grid"):
+def parameter_search(loop_kwargs, grid=False, subdir=None):
+    if subdir is None:
+        subdir = "parameter_grid" if grid else "parameter_atomic"
+
     if not os.path.isdir(subdir):
         os.mkdir(subdir)
-    parameter_names = loop_kwargs.keys()
-    parameter_lists = loop_kwargs.values()
 
     def Agents_id(Agents):
         return "".join([
-            id += Agent.__name__ + "n"
+            Agent.__name__ + "n"
             for Agent, n in Agents.items()
         ])
 
-    parameter_tuples = list(itertools.product(*parameter_lists))
+    parameter_names = loop_kwargs.keys()
+    parameter_lists = loop_kwargs.values()
+
+    if grid:
+        parameter_tuples = list(itertools.product(*parameter_lists))
+    else:
+        parameter_tuples = [
+            tuple([
+                param if param_name1 == param_name2 else None
+                for param_name2 in parameter_names
+            ])
+            for param_name1, param_list in zip(parameter_names, parameter_lists)
+            for param in param_list
+        ]
+
     random.shuffle(parameter_tuples)
     for parameters in parameter_tuples:
-        kws = {k: v for k, v in zip(parameter_names, parameters)}
+        kws = {k: v for k, v in zip(parameter_names, parameters) if v is not None}
         file_id = "_".join(f"{k}-{v if k is not 'Agents' else Agents_id(v)}" for k, v in kws.items())
 
         train_filename = os.path.join(subdir, "train_" + file_id + ".pdf")
@@ -643,14 +660,35 @@ def parameter_search(loop_kwargs, subdir="parameter_grid"):
 
 def main():
     # Run experiment
-    parameter_search(dict(
-        learning_rate_change=[0.001, 0.01, 0.1],
-        discount=[0.96, 0.98, 0.99],
-        epsilon=[0.1, 0.2, 0.4],
-        epsilon_change=[0.02, 0.05],
-        growth_rate=[0.05, 0.15],
-        Agents=[{QLearner: 2}, {QLearner: 3}],
-    ))
+    parameter_search(
+        dict(
+            Agents=[
+                {QLearner: 1},
+                {QLearner: 1, Punisher: 1},
+                {QLearner: 1, AlwaysPick: 1},
+                {QLearner: 2},
+                {QLearner: 2, Punisher: 1},
+                {QLearner: 2, AlwaysPick: 1},
+                {QLearner: 3},
+                {QLearner: 3, AlwaysPick: 1, Punisher: 1},
+                {QLearner: 3, Punisher: 1},
+                {QLearner: 3, AlwaysPick: 1},
+            ],
+            tag_cost=[0.0, 0.01, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0],
+        ),
+        grid=True,
+    )
+    parameter_search(
+        dict(
+            Agents=[
+                {QLearner: 1},
+                {QLearner: 2},
+                {QLearner: 3},
+            ],
+            n_epochs=[200, 1000],
+        ),
+        grid=True,
+    )
 
     # Visualize apple population logistic growth
     fig = visualize_growth()

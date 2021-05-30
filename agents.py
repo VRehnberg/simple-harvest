@@ -103,6 +103,13 @@ class Punisher(AppleAgent):
         return action
 
 
+class AlwaysPick(AppleAgent):
+    """Punishes those that take apples when below half capacity."""
+
+    def act(self):
+        return 1
+
+
 class QLearner(AppleAgent):
 
     def __init__(
