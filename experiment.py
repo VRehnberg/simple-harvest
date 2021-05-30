@@ -310,6 +310,8 @@ class QValuePlotter:
         cbar = fig.colorbar(cm.ScalarMappable(cmap=cmap, norm=norm), ax=axs, location="right", fraction=0.07)
         cbar.set_label("Q-value")
 
+        self.fig = fig
+
 
 def train_agents(
         env,
