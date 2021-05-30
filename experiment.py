@@ -333,6 +333,7 @@ def train_agents(
         t_max=1000,
         plot=True,
         metrics=tuple(),
+        pause4plot=True,
 ):
     """Train agents for some epochs."""
 
@@ -393,7 +394,8 @@ def train_agents(
             if plot:
                 # Add agents progress
                 train_plotter.update(epoch, rewards)
-                plt.pause(0.01)
+                if pause4plot:
+                    plt.pause(0.01)
 
             pbar.update(1)
 
@@ -405,12 +407,14 @@ def train_agents(
                 alpha=(1 / n_trials),
             )
             q_value_plotter.update(trial)
-            plt.pause(0.01)
+            if pause4plot:
+                plt.pause(0.01)
 
     if plot:
         train_plotter.summarize(epochs, all_rewards, all_metrics)
         q_value_plotter.plot()
-        plt.pause(0.1)
+        if pause4plot:
+            plt.pause(0.1)
 
     pbar.close()
 
@@ -566,6 +570,7 @@ def experiment_handler(
         t_max=1000,
         Agents=None,
         tag_cost=0.0,
+        **kws,
 ):
     # Example run
     if Agents is None:
@@ -606,7 +611,7 @@ def experiment_handler(
     if n_agents == 1:
         # Gini doesn't make sense if you have a single agent
         metrics = [m for m in metrics if not isinstance(m, GiniMetric)]
-    training_figs = train_agents(env, agents, metrics=metrics, n_trials=n_trials, n_epochs=n_epochs, t_max=t_max)
+    training_figs = train_agents(env, agents, metrics=metrics, n_trials=n_trials, n_epochs=n_epochs, t_max=t_max, **kws)
     run_example(env, agents, t_max=t_max, render=False)
 
     return training_figs
@@ -650,7 +655,7 @@ def parameter_search(loop_kwargs, grid=False, subdir=None):
         if os.path.isfile(train_filename) or os.path.isfile(qval_filename):
             continue
 
-        train_fig, qval_fig = experiment_handler(**kws)
+        train_fig, qval_fig = experiment_handler(**kws, pause4plot=False)
 
         train_fig.savefig(train_filename, bbox_inches="tight")
         qval_fig.savefig(qval_filename, bbox_inches="tight")
