@@ -626,7 +626,7 @@ def parameter_search(loop_kwargs, grid=False, subdir=None):
 
     def Agents_id(Agents):
         return "".join([
-            Agent.__name__ + "n"
+            Agent.__name__ + f"{n}"
             for Agent, n in Agents.items()
         ])
 
