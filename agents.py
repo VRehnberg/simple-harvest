@@ -118,11 +118,14 @@ class QLearner(AppleAgent):
         n_agents,
         learning_rate=1.0,
         learning_rate_change=0.0,
-        discount=1.0,
+        discount=0.99,
         epsilon=0.0,
         epsilon_change=0.0,
     ):
         super().__init__(max_apples, n_agents)
+
+        if discount >= 1.0:
+            raise ValueError(f"discount is {discount:.2g}, should be in range [0, 1).")
 
         # Dimensionality
         self.observation_dims = [
@@ -132,19 +135,18 @@ class QLearner(AppleAgent):
             ]
         ]
         self.n_states = np.prod(self.observation_dims)
-        self.q_values = np.zeros([self.n_states, self.n_actions])
+        
 
         self.state = None
 
         # Learning parameters
         self.initial_learning_rate = learning_rate
-        self.learning_rate = learning_rate
         self.learning_rate_change = learning_rate_change
         self.discount = discount
         self.initial_epsilon = epsilon
-        self.epsilon = epsilon
         self.epsilon_change = epsilon_change
-        self.episode = 0
+
+        self.reinitialize()
 
     def observe_(self, observation):
         observation = np.atleast_1d(observation)
@@ -204,7 +206,11 @@ class QLearner(AppleAgent):
         super().reinitialize()
         self.learning_rate = self.initial_learning_rate
         self.epsilon = self.initial_epsilon
-        self.q_values = np.zeros([self.n_states, self.n_actions])
+        self.q_values = np.full(
+            [self.n_states, self.n_actions],
+            1.0 / (1.0 - self.discount),
+        )
+        self.episode = 0
 
     #def __repr__(self):
     #    return (

@@ -666,35 +666,36 @@ def parameter_search(loop_kwargs, grid=False, subdir=None):
 
 def main():
     # Run experiment
-    parameter_search(
-        dict(
-            Agents=[
-                {QLearner: 1},
-                {QLearner: 1, Punisher: 1},
-                {QLearner: 1, AlwaysPick: 1},
-                {QLearner: 2},
-                {QLearner: 2, Punisher: 1},
-                {QLearner: 2, AlwaysPick: 1},
-                {QLearner: 3},
-                {QLearner: 3, AlwaysPick: 1, Punisher: 1},
-                {QLearner: 3, Punisher: 1},
-                {QLearner: 3, AlwaysPick: 1},
-            ],
-            tag_cost=[0.0, 0.01, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0],
-        ),
-        grid=True,
-    )
-    parameter_search(
-        dict(
-            Agents=[
-                {QLearner: 1},
-                {QLearner: 2},
-                {QLearner: 3},
-            ],
-            n_epochs=[200, 1000],
-        ),
-        grid=True,
-    )
+    #parameter_search(
+    #    dict(
+    #        Agents=[
+    #            {QLearner: 1},
+    #            {QLearner: 1, Punisher: 1},
+    #            {QLearner: 1, AlwaysPick: 1},
+    #            {QLearner: 2},
+    #            {QLearner: 2, Punisher: 1},
+    #            {QLearner: 2, AlwaysPick: 1},
+    #            {QLearner: 3},
+    #            {QLearner: 2, AlwaysPick: 1, Punisher: 1},
+    #            {QLearner: 3, Punisher: 1},
+    #            {QLearner: 3, AlwaysPick: 1},
+    #        ],
+    #        tag_cost=[0.0, 0.01, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0],
+    #    ),
+    #    grid=True,
+    #)
+    #parameter_search(
+    #    dict(
+    #        Agents=[
+    #            {QLearner: 1},
+    #            {QLearner: 2},
+    #            {QLearner: 3},
+    #        ],
+    #        n_epochs=[200, 1000],
+    #    ),
+    #    grid=True,
+    #)
+    experiment_handler()
 
     # Visualize apple population logistic growth
     fig = visualize_growth()
